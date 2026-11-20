@@ -10,7 +10,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 
-const BASE = 'https://api.kiot.io/api/v1/'; // keep in sync with src/settings.ts
+const BASE = 'https://api.kiot.io/api/v1/'; // logged-in endpoints; keep in sync with src/settings.ts
+const AUTH_BASE = 'https://api.kiot.io/'; // login/sign-up endpoints have no /api/v1 prefix
 const PARTNER_ID = '64183d9c85be48b30615fac4'; // keep in sync with src/settings.ts
 const DEV_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '.dev');
 const RAW_DIR = join(DEV_DIR, 'raw');
@@ -35,8 +36,8 @@ function ask(question, hidden = false) {
   });
 }
 
-async function call(method, path, token, body) {
-  const res = await fetch(BASE + path, {
+async function call(method, path, token, body, base = BASE) {
+  const res = await fetch(base + path, {
     method,
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     body: body ? JSON.stringify(body) : undefined,
@@ -96,11 +97,11 @@ await chmod(RAW_DIR, 0o700);
 
 const shapes = {};
 // Same pre-check the app's login screen does before showing the password field.
-const exists = await call('POST', 'user/authenticate/userExists', null, { partner: PARTNER_ID, input: email });
+const exists = await call('POST', 'user/authenticate/userExists', null, { partner: PARTNER_ID, input: email }, AUTH_BASE);
 console.log(`  account found for Superfan: ${exists.data?.success === 1 ? 'yes' : `no (success=${JSON.stringify(exists.data?.success)})`}`);
 shapes.userExists = { status: exists.status, body: shape(exists.data) };
 
-const login = await call('POST', 'user/authenticate_v2', null, { email, password, loginType: 'password', partner: PARTNER_ID });
+const login = await call('POST', 'user/authenticate_v2', null, { email, password, loginType: 'password', partner: PARTNER_ID }, AUTH_BASE);
 shapes.login = { status: login.status, body: shape(login.data) };
 if (login.status !== 200 || typeof login.data?.token !== 'string') {
   // Server error text only; never echo it if it somehow contains the password.
