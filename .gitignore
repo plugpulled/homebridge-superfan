@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+superfan-app/
+.dev/
+.homebridge-dev/
+docs/superpowers/
+.superpowers/
+*.tgz
+.DS_Store
