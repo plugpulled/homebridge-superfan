@@ -1,0 +1,63 @@
+{
+  "pluginAlias": "Superfan",
+  "pluginType": "platform",
+  "singular": true,
+  "headerDisplay": "Control Superfan smart fans from Apple Home. Unofficial; not affiliated with Superfan or KIOT. Sign in with the email and password you use in the My Superfan app.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "title": "Name",
+        "type": "string",
+        "default": "Superfan"
+      },
+      "email": {
+        "title": "Superfan email",
+        "type": "string",
+        "format": "email",
+        "required": true
+      },
+      "password": {
+        "title": "Superfan password",
+        "type": "string",
+        "required": true,
+        "x-schema-form": {
+          "type": "password"
+        }
+      },
+      "pollInterval": {
+        "title": "Status check interval (seconds)",
+        "type": "integer",
+        "default": 5,
+        "minimum": 2,
+        "maximum": 300,
+        "description": "How often each fan is asked for its state, so changes from the remote or the app show up in Home."
+      },
+      "devices": {
+        "title": "Per-fan overrides (optional)",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "deviceId": {
+              "title": "Fan device ID",
+              "type": "string",
+              "description": "The 12-character ID shown in the Homebridge log (e.g. from the fan's network name fan_<deviceId>)."
+            },
+            "host": {
+              "title": "Fixed IP address",
+              "type": "string",
+              "description": "Use when the fan cannot be found automatically (e.g. Homebridge in Docker without host networking)."
+            },
+            "model": {
+              "title": "Model name shown in Home",
+              "type": "string",
+              "placeholder": "Superfan Smart Fan"
+            }
+          }
+        }
+      }
+    },
+    "required": ["email", "password"]
+  }
+}
