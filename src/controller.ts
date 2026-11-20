@@ -1,0 +1,215 @@
+import { EventEmitter } from 'node:events';
+import type { FanClientLike } from './local/fanClient.js';
+import { OFFLINE_AFTER_FAILURES, OFFLINE_BACKOFF_CAP_MS, REREAD_AFTER_COMMAND_MS } from './settings.js';
+import { fromDimm, toDimm } from './speed.js';
+import type { FanRecord, FanState, FanStatus, Logger } from './types.js';
+
+const RERESOLVE_MIN_GAP_MS = 5 * 60_000;
+
+/** Thrown by commands while the fan is unreachable. */
+export class OfflineError extends Error {
+  constructor(fanName: string) {
+    super(`${fanName} is not responding`);
+    this.name = 'OfflineError';
+  }
+}
+
+export interface FanControllerLike {
+  readonly state: FanState;
+  setFanOn(on: boolean): Promise<void>;
+  setSpeed(speed: number): Promise<void>;
+  setLight(on: boolean): Promise<void>;
+  on(event: 'change', listener: (state: FanState) => void): this;
+}
+
+export interface FanControllerOptions {
+  client: FanClientLike;
+  fan: FanRecord;
+  pollIntervalMs: number;
+  log: Logger;
+  /** Finds the fan's current address when it stops answering (mDNS, cloud). */
+  reresolve?: () => Promise<string | undefined>;
+}
+
+/**
+ * Owns one fan's state: polls it, sends commands with optimistic updates,
+ * and tracks reachability (offline after repeated failures, with backoff).
+ */
+export class FanController extends EventEmitter implements FanControllerLike {
+  private readonly client: FanClientLike;
+  private readonly fan: FanRecord;
+  private readonly pollIntervalMs: number;
+  private readonly log: Logger;
+  private readonly reresolve?: () => Promise<string | undefined>;
+
+  private current: FanState = { online: true, fanOn: false, speed: 1, lightOn: false };
+  private failures = 0;
+  private commandSeq = 0;
+  private lastReresolve?: number;
+  private pollTimer?: NodeJS.Timeout;
+  private rereadTimer?: NodeJS.Timeout;
+  private stopped = false;
+
+  constructor(options: FanControllerOptions) {
+    super();
+    this.client = options.client;
+    this.fan = options.fan;
+    this.pollIntervalMs = options.pollIntervalMs;
+    this.log = options.log;
+    this.reresolve = options.reresolve;
+  }
+
+  get state(): FanState {
+    return { ...this.current };
+  }
+
+  start(): void {
+    this.stopped = false;
+    void this.poll();
+  }
+
+  stop(): void {
+    this.stopped = true;
+    clearTimeout(this.pollTimer);
+    clearTimeout(this.rereadTimer);
+  }
+
+  async setFanOn(on: boolean): Promise<void> {
+    this.assertOnline();
+    if (this.current.fanOn === on) {
+      return; // already there (possibly optimistically, e.g. a speed change just turned it on)
+    }
+    this.update({ fanOn: on });
+    await this.command(() => this.client.setRelay(this.fan.fanSwitchNo, on));
+  }
+
+  async setSpeed(speed: number): Promise<void> {
+    this.assertOnline();
+    if (speed <= 0) {
+      return this.setFanOn(false);
+    }
+    const wasOn = this.current.fanOn;
+    this.update({ speed, fanOn: true });
+    await this.command(async () => {
+      await this.client.setDimmer(this.fan.fanSwitchNo, toDimm(speed, this.fan.steps));
+      if (!wasOn) {
+        await this.client.setRelay(this.fan.fanSwitchNo, true);
+      }
+    });
+  }
+
+  async setLight(on: boolean): Promise<void> {
+    this.assertOnline();
+    const lightSwitchNo = this.fan.lightSwitchNo;
+    if (lightSwitchNo === undefined) {
+      return;
+    }
+    this.update({ lightOn: on });
+    await this.command(() => this.client.setRelay(lightSwitchNo, on));
+  }
+
+  private assertOnline(): void {
+    if (!this.current.online) {
+      throw new OfflineError(this.fan.name);
+    }
+  }
+
+  /** Runs a command; whatever happens, re-read the real state shortly after. */
+  private async command(send: () => Promise<unknown>): Promise<void> {
+    this.commandSeq++;
+    try {
+      await send();
+    } finally {
+      this.scheduleReread();
+    }
+  }
+
+  private scheduleReread(): void {
+    clearTimeout(this.rereadTimer);
+    this.rereadTimer = setTimeout(() => void this.read(), REREAD_AFTER_COMMAND_MS);
+  }
+
+  private async poll(): Promise<void> {
+    if (this.stopped) return;
+    await this.read();
+    if (this.stopped) return;
+    this.pollTimer = setTimeout(() => void this.poll(), this.nextPollDelay());
+  }
+
+  private nextPollDelay(): number {
+    if (this.failures < OFFLINE_AFTER_FAILURES) {
+      return this.pollIntervalMs;
+    }
+    return Math.min(this.pollIntervalMs * 2 ** (this.failures - OFFLINE_AFTER_FAILURES + 1), OFFLINE_BACKOFF_CAP_MS);
+  }
+
+  private async read(): Promise<void> {
+    const seqAtStart = this.commandSeq;
+    let status: FanStatus;
+    try {
+      status = await this.client.getStatus();
+    } catch {
+      await this.onReadFailure();
+      return;
+    }
+    if (this.stopped) return;
+    if (this.failures > 0 || !this.current.online) {
+      if (!this.current.online) {
+        this.log.info(`${this.fan.name} is reachable again`);
+      }
+      this.failures = 0;
+      this.update({ online: true });
+    }
+    if (seqAtStart !== this.commandSeq) {
+      return; // started before a newer command; the re-read after that command will report
+    }
+    this.applyStatus(status);
+  }
+
+  private async onReadFailure(): Promise<void> {
+    if (this.stopped) return;
+    this.failures++;
+    if (this.failures < OFFLINE_AFTER_FAILURES) {
+      return;
+    }
+    if (this.current.online) {
+      this.log.warn(`${this.fan.name} is not responding; will keep retrying`);
+      this.update({ online: false });
+    }
+    await this.tryReresolve();
+  }
+
+  private async tryReresolve(): Promise<void> {
+    if (!this.reresolve) return;
+    const now = Date.now();
+    if (this.lastReresolve !== undefined && now - this.lastReresolve < RERESOLVE_MIN_GAP_MS) return;
+    this.lastReresolve = now;
+    try {
+      const host = await this.reresolve();
+      if (host && !this.stopped) {
+        this.client.setHost(host);
+        this.log.debug(`${this.fan.name}: trying address ${host}`);
+      }
+    } catch {
+      this.log.debug(`${this.fan.name}: address lookup failed`);
+    }
+  }
+
+  private applyStatus(status: FanStatus): void {
+    const relay = (switchNo: number | undefined): boolean => switchNo !== undefined && status.relays[switchNo - 1] === 1;
+    this.update({
+      fanOn: relay(this.fan.fanSwitchNo),
+      lightOn: relay(this.fan.lightSwitchNo),
+      speed: status.dimmer === undefined ? this.current.speed : fromDimm(status.dimmer, this.fan.steps),
+    });
+  }
+
+  private update(patch: Partial<FanState>): void {
+    const next = { ...this.current, ...patch };
+    const changed = (Object.keys(next) as (keyof FanState)[]).some((k) => next[k] !== this.current[k]);
+    this.current = next;
+    if (changed) {
+      this.emit('change', this.state);
+    }
+  }
+}
