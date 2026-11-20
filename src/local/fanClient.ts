@@ -88,7 +88,8 @@ export class FanClient {
   }
 
   async setRelay(switchNo: number, on: boolean): Promise<FanStatus | undefined> {
-    return this.command(`key=${switchNo}&value=${on}`);
+    // Firmware 4.2.0 parses value as a number: "true"/"false" both read as 0 (off). Verified on a real fan.
+    return this.command(`key=${switchNo}&value=${on ? 1 : 0}`);
   }
 
   async setDimmer(switchNo: number, value: number): Promise<FanStatus | undefined> {

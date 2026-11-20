@@ -65,16 +65,16 @@ describe('FanClient against a fake fan', () => {
     expect(req.method).toBe('POST');
     expect(req.path).toBe('/api/switch');
     expect(req.headers['content-type']).toBe('application/x-www-form-urlencoded');
-    expect(req.body).toBe('key=2&value=true');
+    expect(req.body).toBe('key=2&value=1');
     expect(req.query.get('apikey')).toBe(AK);
     expect(req.query.get('meta')).toBe(META);
     expect(result).toEqual({ relays: [0, 1], dimmer: undefined });
   });
 
-  test('setRelay off sends value=false', async () => {
+  test('setRelay off sends value=0 (firmware reads true/false as 0)', async () => {
     const fan = await fakeFan();
     await client(fan.host).setRelay(1, false);
-    expect(fan.requests[0].body).toBe('key=1&value=false');
+    expect(fan.requests[0].body).toBe('key=1&value=0');
   });
 
   test('setDimmer posts the dimmer command', async () => {
