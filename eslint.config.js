@@ -1,5 +1,6 @@
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
+import globals from 'globals';
 
 export default tseslint.config(
   { ignores: ['dist/', 'coverage/', 'superfan-app/', 'node_modules/', '.dev/', '.homebridge-dev/', '.superpowers/', 'docs/'] },
@@ -7,6 +8,6 @@ export default tseslint.config(
   ...tseslint.configs.recommended,
   {
     files: ['scripts/**/*.mjs'],
-    languageOptions: { globals: { process: 'readonly', console: 'readonly', setTimeout: 'readonly', fetch: 'readonly' } },
+    languageOptions: { globals: globals.node },
   },
 );
