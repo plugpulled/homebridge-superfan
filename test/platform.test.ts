@@ -54,6 +54,11 @@ describe('parseConfig', () => {
     const cfg = parseConfig({ ...base, devices: [{ deviceId: 'AABBCCDDEEFF', host: '10.0.0.9', model: 'Superfan Super Q' }, { host: 'x' }] } as PlatformConfig);
     expect(cfg.devices).toEqual([{ deviceId: 'aabbccddeeff', host: '10.0.0.9', model: 'Superfan Super Q' }]);
   });
+
+  test('accepts the fan\'s network name as its device ID (review M4)', () => {
+    const cfg = parseConfig({ ...base, devices: [{ deviceId: ' fan_AABBCCDDEEFF ', host: '10.0.0.9' }] } as PlatformConfig);
+    expect(cfg.devices[0].deviceId).toBe('aabbccddeeff');
+  });
 });
 
 describe('loadFans', () => {
@@ -198,6 +203,16 @@ describe('SuperfanPlatform', () => {
     await vi.waitFor(() => expect(clients).toHaveLength(1));
     expect(clients[0].host).toBe('10.0.0.99');
     expect(deps.findFanViaMdns).not.toHaveBeenCalled();
+    api.emit('shutdown');
+  });
+
+  test('warns about an override that matches no fan (review M4)', async () => {
+    const api = fakeApi();
+    const { log, msgs } = spyLog();
+    new SuperfanPlatform(log, { ...config, devices: [{ deviceId: 'aabbccddeefe', host: '10.0.0.99' }] } as PlatformConfig, api, makeDeps([fanA]));
+    api.emit('didFinishLaunching');
+    await vi.waitFor(() => expect(api.registerPlatformAccessories).toHaveBeenCalled());
+    expect(msgs.filter((m) => m.level === 'warn' && m.msg.includes('aabbccddeefe'))).toHaveLength(1);
     api.emit('shutdown');
   });
 

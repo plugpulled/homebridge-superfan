@@ -46,7 +46,9 @@ export function parseConfig(raw: PlatformConfig): SuperfanConfig {
   const devices = (Array.isArray(raw.devices) ? raw.devices : [])
     .filter((d: Record<string, unknown>) => nonEmpty(d?.deviceId))
     .map((d: Record<string, unknown>) => {
-      const o: DeviceOverride = { deviceId: (d.deviceId as string).trim().toLowerCase() };
+      // Accept the fan's network name too ("fan_<deviceId>", maybe with ".local").
+      const deviceId = (d.deviceId as string).trim().toLowerCase().replace(/^fan_/, '').replace(/\.local\.?$/, '');
+      const o: DeviceOverride = { deviceId };
       if (nonEmpty(d.host)) o.host = d.host.trim();
       if (nonEmpty(d.model)) o.model = d.model.trim();
       return o;
@@ -157,6 +159,12 @@ export class SuperfanPlatform implements DynamicPlatformPlugin {
     const { fans, lastHosts, keepIds } = await loadFans({ discover: () => this.deps.discover(creds), cachePath, log: this.log });
     if (!fans) {
       return; // unknown: keep restored accessories untouched
+    }
+
+    for (const o of config.devices) {
+      if (!fans.some((f) => f.deviceId === o.deviceId)) {
+        this.log.warn(`Settings mention fan "${o.deviceId}", but no fan with that device ID is on your account; that override is ignored`);
+      }
     }
 
     const plan = planAccessories([...this.cached.keys()], fans, (id) => this.uuidFor(id));
