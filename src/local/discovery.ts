@@ -7,8 +7,15 @@ export function matchesFan(serviceName: string, deviceId: string): boolean {
   return base === `fan_${deviceId.toLowerCase()}`;
 }
 
-/** Browse `_http._tcp` for the fan and return its first IPv4 address, or undefined after the timeout. */
-export function findFanViaMdns(deviceId: string, timeoutMs = 5_000): Promise<string | undefined> {
+/**
+ * Browse `_http._tcp` for the fan and return its first IPv4 address, or undefined after the timeout.
+ * Never throws: socket errors (e.g. port 5353 unavailable) resolve to undefined.
+ */
+export function findFanViaMdns(
+  deviceId: string,
+  timeoutMs = 5_000,
+  createBonjour: () => Bonjour = () => new Bonjour(),
+): Promise<string | undefined> {
   return new Promise((resolve) => {
     let bonjour: Bonjour | undefined;
     let timer: NodeJS.Timeout | undefined;
@@ -23,7 +30,10 @@ export function findFanViaMdns(deviceId: string, timeoutMs = 5_000): Promise<str
       resolve(host);
     };
     try {
-      bonjour = new Bonjour();
+      bonjour = createBonjour();
+      // bonjour-service never listens for errors on its multicast-dns socket; an unhandled
+      // 'error' event (EADDRINUSE/EACCES) would crash the whole Homebridge process.
+      (bonjour as unknown as { server?: { mdns?: NodeJS.EventEmitter } }).server?.mdns?.on('error', () => finish(undefined));
       bonjour.find({ type: 'http' }, (service) => {
         if (!matchesFan(service.name, deviceId)) return;
         const ipv4 = [...(service.addresses ?? []), service.referer?.address ?? ''].find((a) => isIPv4(a));

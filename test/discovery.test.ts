@@ -41,3 +41,24 @@ describe('resolveHost', () => {
     expect(await resolveHost({ mdns: none })).toBeUndefined();
   });
 });
+
+describe('findFanViaMdns', () => {
+  test('an mDNS socket error resolves undefined instead of crashing (review I4)', async () => {
+    const { EventEmitter } = await import('node:events');
+    const { findFanViaMdns } = await import('../src/local/discovery.js');
+    const mdns = new EventEmitter();
+    let destroyed = false;
+    const fake = {
+      server: { mdns },
+      find: () => {
+        setTimeout(() => mdns.emit('error', Object.assign(new Error('bind EADDRINUSE'), { code: 'EADDRINUSE' })), 5);
+        return {};
+      },
+      destroy: () => {
+        destroyed = true;
+      },
+    };
+    await expect(findFanViaMdns('aabbccddeeff', 2000, () => fake as never)).resolves.toBeUndefined();
+    expect(destroyed).toBe(true);
+  });
+});
