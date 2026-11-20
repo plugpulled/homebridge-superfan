@@ -55,14 +55,21 @@ export class KiotCloud {
 
   async getHomeIds(token: string): Promise<string[]> {
     const body = await this.get(token, 'homes/myhomes?only_ids=true');
-    if (!Array.isArray(body)) return [];
+    if (!Array.isArray(body)) {
+      throw new Error('Superfan cloud returned an unexpected homes list');
+    }
     return body
       .map((h: unknown) => (typeof h === 'string' ? h : (h as { _id?: unknown } | null)?._id))
       .filter((id): id is string => typeof id === 'string' && id.length > 0);
   }
 
-  getDevices(token: string, homeId: string): Promise<unknown> {
-    return this.get(token, `userdevices/mydevices?home=${encodeURIComponent(homeId)}&append=room,swappliance,kiotdevice`);
+  async getDevices(token: string, homeId: string): Promise<unknown> {
+    const body = await this.get(token, `userdevices/mydevices?home=${encodeURIComponent(homeId)}&append=room,swappliance,kiotdevice`);
+    // An unexpected shape must fail loudly: treating it as "no fans" would remove the user's accessories.
+    if (!body || typeof body !== 'object' || !Array.isArray((body as { rooms?: unknown }).rooms)) {
+      throw new Error('Superfan cloud returned an unexpected device list');
+    }
+    return body;
   }
 
   async getIps(token: string, homeId: string): Promise<Record<string, string>> {

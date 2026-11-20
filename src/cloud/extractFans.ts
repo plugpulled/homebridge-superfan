@@ -4,6 +4,7 @@ import type { FanRecord } from '../types.js';
 export interface SkippedFan {
   name: string;
   reason: string;
+  deviceId?: string;
 }
 
 interface RawSwitch {
@@ -51,24 +52,24 @@ export function extractFans(raw: unknown): { fans: FanRecord[]; skipped: Skipped
     if (!isFan) continue;
 
     const name = str(device.device_name) ?? 'Superfan Fan';
+    const info = device.device_info ?? {};
+    const id = (str(info.device_id) ?? str(device.kd_id))?.toLowerCase();
     const regulators = switches.filter((s) => featureOf(s) === 'fan_fan' && s.switch_type === 'regulator');
     const lights = switches.filter((s) => featureOf(s) === 'fan_light' && s.switch_type === 'toggle');
     const others = switches.length - regulators.length - lights.length;
     if (regulators.length !== 1 || lights.length > 1 || others > 0) {
-      skipped.push({ name, reason: 'unsupported switch layout' });
+      skipped.push({ name, reason: 'unsupported switch layout', ...(id ? { deviceId: id } : {}) });
       continue;
     }
 
-    const info = device.device_info ?? {};
     const apikey = str(info.apikey);
     const apiSecret = str(info.apiSecret);
-    const id = str(info.device_id) ?? str(device.kd_id);
     if (!apikey || !apiSecret || !id) {
-      skipped.push({ name, reason: 'missing local access keys' });
+      skipped.push({ name, reason: 'missing local access keys', ...(id ? { deviceId: id } : {}) });
       continue;
     }
 
-    const deviceId = id.toLowerCase();
+    const deviceId = id;
     const steps = Number(regulators[0].dimming_steps);
     const fan: FanRecord = {
       deviceId,

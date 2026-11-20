@@ -28,6 +28,7 @@ describe('extractFans', () => {
     expect(skipped).toHaveLength(1);
     expect(skipped[0].name).toBe('Twin Fan');
     expect(skipped[0].reason).toMatch(/unsupported/i);
+    expect(skipped[0].deviceId).toBe('665544332211');
   });
 
   test('non-fan devices are ignored silently', () => {

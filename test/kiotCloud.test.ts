@@ -79,6 +79,13 @@ describe('KiotCloud data endpoints', () => {
     for (const c of f.calls) expect(c.headers.authorization).toBe('Bearer tok_1');
   });
 
+  test('unexpected reply shapes are errors, not "no fans" (review I2)', async () => {
+    const odd = fakeFetch((seen) => ({ status: 200, body: seen.url.includes('homes') ? { data: [{ _id: 'h1' }] } : {} }));
+    const cloud = new KiotCloud({ fetchImpl: odd.impl });
+    await expect(cloud.getHomeIds('tok_1')).rejects.toThrow(/unexpected/i);
+    await expect(cloud.getDevices('tok_1', 'h1')).rejects.toThrow(/unexpected/i);
+  });
+
   test('a failed data call rejects with the HTTP status and no token in the message', async () => {
     const f = fakeFetch(() => ({ status: 500, body: {} }));
     const err = await new KiotCloud({ fetchImpl: f.impl }).getHomeIds('tok_secret_1').catch((e: unknown) => e);

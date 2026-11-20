@@ -63,7 +63,7 @@ describe('loadFans', () => {
     await writeCache(path(), { version: 1, fans: [fanB], lastHosts: { aabbccddeeff: '10.0.0.7' } });
     const { log } = spyLog();
     const result = await loadFans({ discover: async () => ({ fans: [fanA], skipped: [] }), cachePath: path(), log });
-    expect(result).toEqual({ fans: [fanA], lastHosts: { aabbccddeeff: '10.0.0.7' } });
+    expect(result).toEqual({ fans: [fanA], lastHosts: { aabbccddeeff: '10.0.0.7' }, keepIds: [] });
     expect((await readCache(path()))?.fans).toEqual([fanA]);
   });
 
@@ -86,6 +86,15 @@ describe('loadFans', () => {
     expect(warns).toHaveLength(1);
     expect(warns[0].msg).toMatch(/email\/password/);
     expect(msgs.map((m) => m.msg).join('\n')).not.toMatch(/ak_fake|sk_fake/);
+  });
+
+  test('cloud reporting zero fans while the cache has some keeps the cache (review I2)', async () => {
+    await writeCache(path(), { version: 1, fans: [fanA], lastHosts: {} });
+    const { log, msgs } = spyLog();
+    const result = await loadFans({ discover: async () => ({ fans: [], skipped: [] }), cachePath: path(), log });
+    expect(result.fans).toEqual([fanA]);
+    expect((await readCache(path()))?.fans).toEqual([fanA]);
+    expect(msgs.filter((m) => m.level === 'warn')).toHaveLength(1);
   });
 
   test('cloud down and no cache: fans unknown, one error', async () => {
@@ -207,6 +216,21 @@ describe('SuperfanPlatform', () => {
     platform.configureAccessory(stale as never);
     api.emit('didFinishLaunching');
     await vi.waitFor(() => expect(api.unregisterPlatformAccessories).toHaveBeenCalledWith('homebridge-superfan', 'Superfan', [stale]));
+    api.emit('shutdown');
+  });
+
+  test('a fan that becomes unsupported keeps its accessory (review I2)', async () => {
+    const api = fakeApi();
+    const deps = makeDeps([fanA]);
+    deps.discover = vi.fn(async () => ({ fans: [fanA], skipped: [{ name: 'Study Fan', reason: 'unsupported switch layout', deviceId: '112233445566' }] }));
+    const platform = new SuperfanPlatform(spyLog().log, config, api, deps);
+    const study = new FakePlatformAccessory('Study Fan', hap.uuid.generate('superfan:112233445566'));
+    const gone = new FakePlatformAccessory('Old Fan', hap.uuid.generate('superfan:000000000000'));
+    platform.configureAccessory(study as never);
+    platform.configureAccessory(gone as never);
+    api.emit('didFinishLaunching');
+    await vi.waitFor(() => expect(api.unregisterPlatformAccessories).toHaveBeenCalled());
+    expect(api.unregisterPlatformAccessories).toHaveBeenCalledWith('homebridge-superfan', 'Superfan', [gone]);
     api.emit('shutdown');
   });
 

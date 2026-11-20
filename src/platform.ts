@@ -63,7 +63,7 @@ export async function loadFans(d: {
   discover: () => Promise<Discovery>;
   cachePath: string;
   log: Logger;
-}): Promise<{ fans?: FanRecord[]; lastHosts: Record<string, string> }> {
+}): Promise<{ fans?: FanRecord[]; lastHosts: Record<string, string>; keepIds: string[] }> {
   const cache = await readCache(d.cachePath);
   const lastHosts = cache?.lastHosts ?? {};
   try {
@@ -71,18 +71,24 @@ export async function loadFans(d: {
     for (const s of skipped) {
       d.log.warn(`Skipping "${s.name}" (${s.reason}); please open an issue at ${ISSUES_URL}`);
     }
+    // Fans still on the account but not usable keep their Home accessory (and the user's automations).
+    const keepIds = skipped.flatMap((s) => (s.deviceId ? [s.deviceId] : []));
+    if (fans.length === 0 && skipped.length === 0 && cache?.fans.length) {
+      d.log.warn('Superfan reported no fans on your account; keeping the saved fans. Remove them in Homebridge if they are really gone.');
+      return { fans: cache.fans, lastHosts, keepIds };
+    }
     await writeCache(d.cachePath, { version: 1, fans, lastHosts });
-    return { fans, lastHosts };
+    return { fans, lastHosts, keepIds };
   } catch (error) {
     const why = error instanceof CloudAuthError
       ? 'Superfan login failed: check email/password in the plugin settings'
       : `Superfan cloud unavailable (${(error as Error).message})`;
     if (cache) {
       d.log.warn(`${why}; using saved fan details`);
-      return { fans: cache.fans, lastHosts };
+      return { fans: cache.fans, lastHosts, keepIds: [] };
     }
     d.log.error(`${why}; no saved fan details yet, so no fans can be set up`);
-    return { fans: undefined, lastHosts };
+    return { fans: undefined, lastHosts, keepIds: [] };
   }
 }
 
@@ -148,13 +154,14 @@ export class SuperfanPlatform implements DynamicPlatformPlugin {
     const config = this.config!;
     const creds = { email: config.email, password: config.password };
     const cachePath = join(this.api.user.storagePath(), 'superfan', 'cache.json');
-    const { fans, lastHosts } = await loadFans({ discover: () => this.deps.discover(creds), cachePath, log: this.log });
+    const { fans, lastHosts, keepIds } = await loadFans({ discover: () => this.deps.discover(creds), cachePath, log: this.log });
     if (!fans) {
       return; // unknown: keep restored accessories untouched
     }
 
     const plan = planAccessories([...this.cached.keys()], fans, (id) => this.uuidFor(id));
-    const stale = plan.remove.map((u) => this.cached.get(u)!).filter(Boolean);
+    const keep = new Set(keepIds.map((id) => this.uuidFor(id)));
+    const stale = plan.remove.filter((u) => !keep.has(u)).map((u) => this.cached.get(u)!).filter(Boolean);
     if (stale.length) {
       this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, stale);
       for (const a of stale) this.cached.delete(a.UUID);
