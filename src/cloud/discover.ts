@@ -25,7 +25,7 @@ export async function discoverFromCloud(cloud: KiotCloud, creds: Credentials, lo
     try {
       ips = Object.fromEntries(Object.entries(await cloud.getIps(token, homeId)).map(([k, v]) => [normaliseLocalName(k), v]));
     } catch {
-      log.debug('Superfan: could not fetch fan addresses from the cloud; will use local discovery');
+      log.debug('Could not fetch fan addresses from the cloud; will use local discovery');
     }
     for (const fan of found.fans) {
       if (byId.has(fan.deviceId)) continue;
@@ -35,6 +35,6 @@ export async function discoverFromCloud(cloud: KiotCloud, creds: Credentials, lo
     for (const s of found.skipped) skipped.set(s.name, s);
   }
 
-  log.info(`Superfan: found ${byId.size} fan(s) on your account`);
+  log.info(`Found ${byId.size} fan(s) on your Superfan account`);
   return { fans: [...byId.values()], skipped: [...skipped.values()] };
 }

@@ -1,19 +1,50 @@
 {
   "name": "homebridge-superfan",
-  "version": "0.0.0",
-  "private": true,
-  "description": "Homebridge plugin for Superfan smart fans (unofficial)",
+  "displayName": "Homebridge Superfan",
+  "version": "0.1.0",
+  "description": "Control Superfan smart fans from Apple Home over your local network (unofficial).",
+  "author": "Hanif Roshan",
+  "license": "MIT",
+  "homepage": "https://github.com/plugpulled/homebridge-superfan#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/plugpulled/homebridge-superfan.git"
+  },
+  "bugs": {
+    "url": "https://github.com/plugpulled/homebridge-superfan/issues"
+  },
+  "keywords": [
+    "homebridge-plugin",
+    "superfan",
+    "kiot",
+    "fan"
+  ],
   "type": "module",
   "main": "dist/index.js",
+  "files": [
+    "dist",
+    "config.schema.json",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": "^22.12.0 || ^24.0.0 || ^26.0.0",
+    "homebridge": "^1.8.0 || ^2.0.0"
+  },
+  "packageManager": "pnpm@10.28.2",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.test.json",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "pnpm lint && pnpm test && pnpm build"
   },
-  "engines": {
-    "node": "^22.12.0 || ^24.0.0 || ^26.0.0",
+  "peerDependencies": {
     "homebridge": "^1.8.0 || ^2.0.0"
+  },
+  "dependencies": {
+    "bonjour-service": "^1.4.4"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -25,14 +56,5 @@
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.73.0",
     "vitest": "^5.1.1"
-  },
-  "dependencies": {
-    "bonjour-service": "^1.4.4"
-  },
-  "keywords": [
-    "homebridge-plugin",
-    "superfan",
-    "kiot",
-    "fan"
-  ]
+  }
 }

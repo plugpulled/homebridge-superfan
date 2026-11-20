@@ -37,8 +37,8 @@ const nonEmpty = (v: unknown): v is string => typeof v === 'string' && v.length 
 /** Validate the platform block from config.json. Never echoes credential values. */
 export function parseConfig(raw: PlatformConfig): SuperfanConfig {
   const email = typeof raw.email === 'string' ? raw.email.trim() : '';
-  if (!email) throw new ConfigError('Superfan: "email" is required in the plugin settings');
-  if (!nonEmpty(raw.password)) throw new ConfigError('Superfan: "password" is required in the plugin settings');
+  if (!email) throw new ConfigError('"email" is required in the plugin settings');
+  if (!nonEmpty(raw.password)) throw new ConfigError('"password" is required in the plugin settings');
 
   const interval = Number(raw.pollInterval ?? DEFAULT_POLL_INTERVAL_S);
   const pollInterval = Math.min(300, Math.max(2, Number.isFinite(interval) ? interval : DEFAULT_POLL_INTERVAL_S));
@@ -69,7 +69,7 @@ export async function loadFans(d: {
   try {
     const { fans, skipped } = await d.discover();
     for (const s of skipped) {
-      d.log.warn(`Superfan: skipping "${s.name}" (${s.reason}); please open an issue at ${ISSUES_URL}`);
+      d.log.warn(`Skipping "${s.name}" (${s.reason}); please open an issue at ${ISSUES_URL}`);
     }
     await writeCache(d.cachePath, { version: 1, fans, lastHosts });
     return { fans, lastHosts };
@@ -131,7 +131,7 @@ export class SuperfanPlatform implements DynamicPlatformPlugin {
       return;
     }
     this.api.on('didFinishLaunching', () => {
-      this.start().catch((error: Error) => this.log.error(`Superfan: startup failed (${error.message})`));
+      this.start().catch((error: Error) => this.log.error(`Startup failed (${error.message})`));
     });
     this.api.on('shutdown', () => this.stop());
   }
@@ -171,7 +171,7 @@ export class SuperfanPlatform implements DynamicPlatformPlugin {
         mdns: () => this.deps.findFanViaMdns(fan.deviceId),
       });
       if (!host) {
-        this.log.warn(`Superfan: could not find "${fan.name}" on the network; set its "host" in the plugin settings`);
+        this.log.warn(`Could not find "${fan.name}" (device ID ${fan.deviceId}) on the network; set its "host" in the plugin settings`);
         continue;
       }
       hosts[fan.deviceId] = host;
@@ -206,7 +206,7 @@ export class SuperfanPlatform implements DynamicPlatformPlugin {
       });
       controller.start();
       this.controllers.push(controller);
-      this.log.info(`Superfan: "${fan.name}" ready at ${host}`);
+      this.log.info(`"${fan.name}" (device ID ${fan.deviceId}) ready at ${host}`);
     }
 
     if (created.length) {
