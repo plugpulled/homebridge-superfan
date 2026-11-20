@@ -152,9 +152,47 @@ describe('commands', () => {
     await startWith({ relays: [0, 0], dimmer: 20 });
     await Promise.all([ctl.setSpeed(3), ctl.setFanOn(true)]);
     const calls = client.commands();
-    expect(calls.filter((c) => c[0] === 'setRelay' && c[1] === 1 && c[2] === true)).toHaveLength(1);
+    expect(calls.filter((c) => c[0] === 'setRelay' && c[1] === 1 && c[2] === true).length).toBeGreaterThanOrEqual(1);
     expect(calls.filter((c) => c[0] === 'setRelay' && c[2] === false)).toHaveLength(0);
     expect(ctl.state).toMatchObject({ fanOn: true, speed: 3 });
+  });
+
+  test('"turn on" is sent even when the cached state already says on (review M1)', async () => {
+    // Poll saw the fan on; the remote has since switched it off; Siri says "turn on the fan".
+    await startWith({ relays: [1, 0], dimmer: 60 });
+    await ctl.setFanOn(true);
+    expect(client.commands()).toEqual([['setRelay', 1, true]]);
+  });
+
+  test('a poll queued behind a speed command cannot flash the tile off (review I3)', async () => {
+    // Serialised like the real FanClient: one request at a time, 300 ms each.
+    // Like the real fan, a dimmer command does not switch the relay on immediately.
+    const fanState = { relay: 0, dimmer: 20 };
+    let chain: Promise<unknown> = Promise.resolve();
+    const queued = <T>(op: () => T): Promise<T> => {
+      const run = chain.then(() => new Promise<T>((r) => setTimeout(() => r(op()), 300)));
+      chain = run.catch(() => undefined);
+      return run;
+    };
+    client.getStatus = () => queued(() => ({ relays: [fanState.relay, 0], dimmer: fanState.dimmer }));
+    client.setDimmer = (_n: number, v: number) => queued(() => {
+      fanState.dimmer = v;
+      return undefined;
+    });
+    client.setRelay = (_n: number, on: boolean) => queued(() => {
+      fanState.relay = on ? 1 : 0;
+      return undefined;
+    });
+    make().start();
+    await vi.advanceTimersByTimeAsync(400); // first poll done: fan off
+    const fanOnEvents: boolean[] = [];
+    ctl.on('change', (s) => fanOnEvents.push(s.fanOn));
+    await vi.advanceTimersByTimeAsync(4700); // t=5100; next poll fires at 5300
+    const cmd = ctl.setSpeed(2); // dimmer runs 5100-5400; the 5300 poll queues behind it, ahead of relay-on
+    await vi.advanceTimersByTimeAsync(3000);
+    await cmd;
+    expect(fanOnEvents).not.toContain(false);
+    expect(ctl.state.fanOn).toBe(true);
   });
 
   test('a poll that started before a command cannot flip the optimistic state back', async () => {

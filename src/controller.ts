@@ -45,6 +45,7 @@ export class FanController extends EventEmitter implements FanControllerLike {
   private current: FanState = { online: true, fanOn: false, speed: 1, lightOn: false };
   private failures = 0;
   private commandSeq = 0;
+  private commandsInFlight = 0;
   private lastReresolve?: number;
   private pollTimer?: NodeJS.Timeout;
   private rereadTimer?: NodeJS.Timeout;
@@ -76,9 +77,8 @@ export class FanController extends EventEmitter implements FanControllerLike {
 
   async setFanOn(on: boolean): Promise<void> {
     this.assertOnline();
-    if (this.current.fanOn === on) {
-      return; // already there (possibly optimistically, e.g. a speed change just turned it on)
-    }
+    // Always send: the cached state may be stale (e.g. the remote was used since the last poll).
+    // A repeated relay-on during a speed change is harmless.
     this.update({ fanOn: on });
     await this.command(() => this.client.setRelay(this.fan.fanSwitchNo, on));
   }
@@ -117,9 +117,14 @@ export class FanController extends EventEmitter implements FanControllerLike {
   /** Runs a command; whatever happens, re-read the real state shortly after. */
   private async command(send: () => Promise<unknown>): Promise<void> {
     this.commandSeq++;
+    this.commandsInFlight++;
     try {
       await send();
     } finally {
+      // Bump again so any read that started *during* the command (and may have been queued
+      // between its requests) is discarded; the re-read below reports the settled state.
+      this.commandsInFlight--;
+      this.commandSeq++;
       this.scheduleReread();
     }
   }
@@ -160,8 +165,8 @@ export class FanController extends EventEmitter implements FanControllerLike {
       this.failures = 0;
       this.update({ online: true });
     }
-    if (seqAtStart !== this.commandSeq) {
-      return; // started before a newer command; the re-read after that command will report
+    if (seqAtStart !== this.commandSeq || this.commandsInFlight > 0) {
+      return; // overlapped a command; the re-read after that command will report
     }
     this.applyStatus(status);
   }
