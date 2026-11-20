@@ -29,7 +29,8 @@ function ask(question, hidden = false) {
     rl.question(question, (answer) => {
       rl.close();
       if (hidden) process.stdout.write('\n');
-      resolve(answer.trim());
+      // The app sends the password exactly as typed; only trim visible input like the email.
+      resolve(hidden ? answer : answer.trim());
     });
   });
 }
@@ -94,9 +95,17 @@ await chmod(DEV_DIR, 0o700);
 await chmod(RAW_DIR, 0o700);
 
 const shapes = {};
+// Same pre-check the app's login screen does before showing the password field.
+const exists = await call('POST', 'user/authenticate/userExists', null, { partner: PARTNER_ID, input: email });
+console.log(`  account found for Superfan: ${exists.data?.success === 1 ? 'yes' : `no (success=${JSON.stringify(exists.data?.success)})`}`);
+shapes.userExists = { status: exists.status, body: shape(exists.data) };
+
 const login = await call('POST', 'user/authenticate_v2', null, { email, password, loginType: 'password', partner: PARTNER_ID });
 shapes.login = { status: login.status, body: shape(login.data) };
 if (login.status !== 200 || typeof login.data?.token !== 'string') {
+  // Server error text only; never echo it if it somehow contains the password.
+  const serverText = [login.data?.head, login.data?.message, login.data?.err].filter((x) => typeof x === 'string').join(' | ');
+  console.log(`  server says: ${serverText && !serverText.includes(password) ? serverText : '(no message)'}`);
   await writeFile(join(DEV_DIR, 'shapes.json'), JSON.stringify(shapes, null, 2), { mode: 0o600 });
   console.log('Login failed; wrote .dev/shapes.json');
   process.exit(1);
