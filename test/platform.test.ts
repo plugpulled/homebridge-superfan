@@ -245,6 +245,28 @@ describe('SuperfanPlatform', () => {
     expect(deps.discover).not.toHaveBeenCalled();
   });
 
+  test('an offline fan never triggers cloud logins after startup (review I1)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const api = fakeApi();
+      const clients: FakeClient[] = [];
+      const deps = makeDeps([fanA], clients);
+      deps.findFanViaMdns = vi.fn(async () => undefined);
+      new SuperfanPlatform(spyLog().log, config, api, deps);
+      api.emit('didFinishLaunching');
+      await vi.waitFor(() => expect(clients).toHaveLength(1));
+      clients[0].getStatus = async () => {
+        throw new Error('unreachable');
+      };
+      await vi.advanceTimersByTimeAsync(60 * 60_000); // an hour offline
+      expect(deps.discover).toHaveBeenCalledTimes(1); // startup only
+      expect(vi.mocked(deps.findFanViaMdns).mock.calls.length).toBeGreaterThan(0); // still looks locally
+      api.emit('shutdown');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test('never logs the password or device keys', async () => {
     const api = fakeApi();
     const { log, msgs } = spyLog();

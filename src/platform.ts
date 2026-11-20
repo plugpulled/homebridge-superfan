@@ -192,9 +192,9 @@ export class SuperfanPlatform implements DynamicPlatformPlugin {
         fan,
         pollIntervalMs: config.pollInterval * 1000,
         log: this.log,
-        reresolve: override?.host ? undefined : async () =>
-          (await this.deps.findFanViaMdns(fan.deviceId))
-          ?? (await this.deps.discover(creds)).fans.find((f) => f.deviceId === fan.deviceId)?.cloudHost,
+        // Local lookup only: an unpowered fan would otherwise mean a cloud login every few minutes,
+        // and the cloud just reports the same last-known IP anyway.
+        reresolve: override?.host ? undefined : () => this.deps.findFanViaMdns(fan.deviceId),
       });
       new SuperfanAccessory({
         hap: this.api.hap,
