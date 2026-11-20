@@ -12,3 +12,6 @@ export const DEFAULT_SPEED_STEPS = 5;
 export const OFFLINE_AFTER_FAILURES = 3;
 export const OFFLINE_BACKOFF_CAP_MS = 30_000;
 export const REREAD_AFTER_COMMAND_MS = 1_000;
+
+/** Login/sign-up endpoints live at the bare host, without the /api/v1 prefix. */
+export const CLOUD_AUTH_BASE_URL = 'https://api.kiot.io/';

@@ -1,0 +1,359 @@
+{
+  "rooms": [
+    {
+      "count": 3,
+      "room_id": "r00000000000000000000001",
+      "room_name": "Bedroom",
+      "devices": [
+        {
+          "_id": "daabbccddeeffaaaaaaaaaaa",
+          "kd_id": "aabbccddeeff",
+          "room_id": {
+            "_id": "r00000000000000000000001",
+            "name": "Bedroom"
+          },
+          "device_type": "FAN",
+          "device_name": "Bedroom Fan",
+          "display_color": 1,
+          "is_online": true,
+          "switch_appliances": [
+            {
+              "_id": "sw1aaaaaaaaaaaaaaaaaaaaa",
+              "switch_no": 1,
+              "name": "Fan",
+              "switch_type": "regulator",
+              "active_wattage": 0,
+              "UDid": "udaaaaaaaaaaaaaaaaaaaaaa",
+              "current_status": 0,
+              "is_virtual": false,
+              "switch_attribute_struct": {
+                "rgb_channel": false,
+                "white_channel": false,
+                "www_channel": false,
+                "tv_channel": false,
+                "www_channel_type": 1,
+                "override": false
+              },
+              "is_configured": false,
+              "dimming_steps": 5,
+              "show_in_app": true,
+              "feature": [
+                {
+                  "id": 4,
+                  "name": "fan_fan",
+                  "_id": "ft1aaaaaaaaaaaaaaaaaaaaa"
+                }
+              ],
+              "current_color": "#FFFFFF"
+            },
+            {
+              "_id": "sw2aaaaaaaaaaaaaaaaaaaaa",
+              "switch_no": 2,
+              "name": "Light",
+              "switch_type": "toggle",
+              "active_wattage": 0,
+              "UDid": "udaaaaaaaaaaaaaaaaaaaaaa",
+              "current_status": 0,
+              "is_virtual": false,
+              "switch_attribute_struct": {
+                "rgb_channel": false,
+                "white_channel": false,
+                "www_channel": false,
+                "tv_channel": false,
+                "www_channel_type": 1,
+                "override": false
+              },
+              "is_configured": false,
+              "show_in_app": true,
+              "feature": [
+                {
+                  "id": 5,
+                  "name": "fan_light",
+                  "_id": "ft2aaaaaaaaaaaaaaaaaaaaa"
+                }
+              ],
+              "current_color": "#FFFFFF"
+            }
+          ],
+          "kiot_device_id": "kaabbccddeeffaaaaaaaaaaa",
+          "dynamic_attributes": {
+            "sensors_capability": {
+              "IR": true
+            }
+          },
+          "mcu_supported": false,
+          "device_features": {
+            "recipes": {
+              "isEnabled": false
+            }
+          },
+          "p_ip": "203.0.113.10",
+          "device_info": {
+            "_id": "iaabbccddeeffaaaaaaaaaaa",
+            "device_id": "aabbccddeeff",
+            "apiSecret": "sk_fake_aabbccddeeff",
+            "apikey": "ak_fake_aabbccddeeff",
+            "device_Type": "aaaaaaaaaaaaaaaaaaaaaaaa",
+            "mqtt_user": "aabbccddeeff",
+            "mqtt_pass": "mp_fake",
+            "dev_type": "FAN",
+            "wifi_hot_name": "fan_aabbccddeeff",
+            "wifi_local_name": "fan_aabbccddeeff.local",
+            "connectivity_type": 1,
+            "device_config": {},
+            "reports_power": true
+          }
+        },
+        {
+          "_id": "d112233445566aaaaaaaaaaa",
+          "kd_id": "112233445566",
+          "room_id": {
+            "_id": "r00000000000000000000001",
+            "name": "Bedroom"
+          },
+          "device_type": "FAN",
+          "device_name": "Study Fan",
+          "display_color": 1,
+          "is_online": true,
+          "switch_appliances": [
+            {
+              "_id": "sw1baaaaaaaaaaaaaaaaaaaa",
+              "switch_no": 1,
+              "name": "Fan",
+              "switch_type": "regulator",
+              "active_wattage": 0,
+              "UDid": "udbaaaaaaaaaaaaaaaaaaaaa",
+              "current_status": 0,
+              "is_virtual": false,
+              "switch_attribute_struct": {
+                "rgb_channel": false,
+                "white_channel": false,
+                "www_channel": false,
+                "tv_channel": false,
+                "www_channel_type": 1,
+                "override": false
+              },
+              "is_configured": false,
+              "dimming_steps": 3,
+              "show_in_app": true,
+              "feature": [
+                {
+                  "id": 4,
+                  "name": "fan_fan",
+                  "_id": "ft1baaaaaaaaaaaaaaaaaaaa"
+                }
+              ],
+              "current_color": "#FFFFFF"
+            }
+          ],
+          "kiot_device_id": "k112233445566aaaaaaaaaaa",
+          "dynamic_attributes": {
+            "sensors_capability": {
+              "IR": true
+            }
+          },
+          "mcu_supported": false,
+          "device_features": {
+            "recipes": {
+              "isEnabled": false
+            }
+          },
+          "p_ip": "203.0.113.10",
+          "device_info": {
+            "_id": "i112233445566aaaaaaaaaaa",
+            "device_id": "112233445566",
+            "apiSecret": "sk_fake_112233445566",
+            "apikey": "ak_fake_112233445566",
+            "device_Type": "aaaaaaaaaaaaaaaaaaaaaaaa",
+            "mqtt_user": "112233445566",
+            "mqtt_pass": "mp_fake",
+            "dev_type": "FAN",
+            "wifi_hot_name": "fan_112233445566",
+            "wifi_local_name": "fan_112233445566.local",
+            "connectivity_type": 1,
+            "device_config": {},
+            "reports_power": true
+          }
+        },
+        {
+          "_id": "d665544332211aaaaaaaaaaa",
+          "kd_id": "665544332211",
+          "room_id": {
+            "_id": "r00000000000000000000001",
+            "name": "Bedroom"
+          },
+          "device_type": "FAN",
+          "device_name": "Twin Fan",
+          "display_color": 1,
+          "is_online": true,
+          "switch_appliances": [
+            {
+              "_id": "sw1caaaaaaaaaaaaaaaaaaaa",
+              "switch_no": 1,
+              "name": "Fan",
+              "switch_type": "regulator",
+              "active_wattage": 0,
+              "UDid": "udcaaaaaaaaaaaaaaaaaaaaa",
+              "current_status": 0,
+              "is_virtual": false,
+              "switch_attribute_struct": {
+                "rgb_channel": false,
+                "white_channel": false,
+                "www_channel": false,
+                "tv_channel": false,
+                "www_channel_type": 1,
+                "override": false
+              },
+              "is_configured": false,
+              "dimming_steps": 5,
+              "show_in_app": true,
+              "feature": [
+                {
+                  "id": 4,
+                  "name": "fan_fan",
+                  "_id": "ft1caaaaaaaaaaaaaaaaaaaa"
+                }
+              ],
+              "current_color": "#FFFFFF"
+            },
+            {
+              "_id": "sw2caaaaaaaaaaaaaaaaaaaa",
+              "switch_no": 2,
+              "name": "Fan 2",
+              "switch_type": "regulator",
+              "active_wattage": 0,
+              "UDid": "udcaaaaaaaaaaaaaaaaaaaaa",
+              "current_status": 0,
+              "is_virtual": false,
+              "switch_attribute_struct": {
+                "rgb_channel": false,
+                "white_channel": false,
+                "www_channel": false,
+                "tv_channel": false,
+                "www_channel_type": 1,
+                "override": false
+              },
+              "is_configured": false,
+              "dimming_steps": 5,
+              "show_in_app": true,
+              "feature": [
+                {
+                  "id": 4,
+                  "name": "fan_fan",
+                  "_id": "ft2caaaaaaaaaaaaaaaaaaaa"
+                }
+              ],
+              "current_color": "#FFFFFF"
+            }
+          ],
+          "kiot_device_id": "k665544332211aaaaaaaaaaa",
+          "dynamic_attributes": {
+            "sensors_capability": {
+              "IR": true
+            }
+          },
+          "mcu_supported": false,
+          "device_features": {
+            "recipes": {
+              "isEnabled": false
+            }
+          },
+          "p_ip": "203.0.113.10",
+          "device_info": {
+            "_id": "i665544332211aaaaaaaaaaa",
+            "device_id": "665544332211",
+            "apiSecret": "sk_fake_665544332211",
+            "apikey": "ak_fake_665544332211",
+            "device_Type": "aaaaaaaaaaaaaaaaaaaaaaaa",
+            "mqtt_user": "665544332211",
+            "mqtt_pass": "mp_fake",
+            "dev_type": "FAN",
+            "wifi_hot_name": "fan_665544332211",
+            "wifi_local_name": "fan_665544332211.local",
+            "connectivity_type": 1,
+            "device_config": {},
+            "reports_power": true
+          }
+        }
+      ]
+    },
+    {
+      "count": 1,
+      "room_id": "r00000000000000000000002",
+      "room_name": "Hall",
+      "devices": [
+        {
+          "_id": "d998877665544aaaaaaaaaaa",
+          "kd_id": "998877665544",
+          "room_id": {
+            "_id": "r00000000000000000000002",
+            "name": "Bedroom"
+          },
+          "device_type": "SWB",
+          "device_name": "Hall Switch",
+          "display_color": 1,
+          "is_online": true,
+          "switch_appliances": [
+            {
+              "_id": "sw1daaaaaaaaaaaaaaaaaaaa",
+              "switch_no": 1,
+              "name": "Lamp",
+              "switch_type": "toggle",
+              "active_wattage": 0,
+              "UDid": "uddaaaaaaaaaaaaaaaaaaaaa",
+              "current_status": 0,
+              "is_virtual": false,
+              "switch_attribute_struct": {
+                "rgb_channel": false,
+                "white_channel": false,
+                "www_channel": false,
+                "tv_channel": false,
+                "www_channel_type": 1,
+                "override": false
+              },
+              "is_configured": false,
+              "show_in_app": true,
+              "feature": [
+                {
+                  "id": 5,
+                  "name": "light",
+                  "_id": "ft1daaaaaaaaaaaaaaaaaaaa"
+                }
+              ],
+              "current_color": "#FFFFFF"
+            }
+          ],
+          "kiot_device_id": "k998877665544aaaaaaaaaaa",
+          "dynamic_attributes": {
+            "sensors_capability": {
+              "IR": true
+            }
+          },
+          "mcu_supported": false,
+          "device_features": {
+            "recipes": {
+              "isEnabled": false
+            }
+          },
+          "p_ip": "203.0.113.10",
+          "device_info": {
+            "_id": "i998877665544aaaaaaaaaaa",
+            "device_id": "998877665544",
+            "apiSecret": "sk_fake_998877665544",
+            "apikey": "ak_fake_998877665544",
+            "device_Type": "aaaaaaaaaaaaaaaaaaaaaaaa",
+            "mqtt_user": "998877665544",
+            "mqtt_pass": "mp_fake",
+            "dev_type": "SWB",
+            "wifi_hot_name": "swb_998877665544",
+            "wifi_local_name": "swb_998877665544.local",
+            "connectivity_type": 1,
+            "device_config": {},
+            "reports_power": true
+          }
+        }
+      ]
+    }
+  ],
+  "other_devices": []
+}
