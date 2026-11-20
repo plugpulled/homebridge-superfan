@@ -69,6 +69,14 @@ function shape(value, key = '', inFeature = false) {
   return value;
 }
 
+/** Like shape() but keeps string values (for non-personal product metadata); secret-looking keys still redacted. */
+function keepStrings(value, key = '') {
+  if (key && ALWAYS_REDACT.test(key)) return '<redacted>';
+  if (Array.isArray(value)) return value.map((v) => keepStrings(v));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, keepStrings(v, k)]));
+  return value;
+}
+
 function findHomeIds(homesData, loginData) {
   const ids = new Set();
   const visit = (v, k) => {
@@ -131,6 +139,16 @@ for (const [i, homeId] of homeIds.entries()) {
   const ips = await call('GET', `userdevices/get_ips?home_id=${homeId}`, token);
   await save(`ips-${homeId}`, ips.data);
   shapes.ips[`home${i}`] = { status: ips.status, body: shape(ips.data) };
+
+  // Per-device custom commands (fan modes, timer, light, ...). Product metadata, so strings are kept.
+  shapes.customCommands = shapes.customCommands ?? {};
+  const deviceList = (devices.data?.rooms ?? []).flatMap((r) => r.devices ?? []);
+  for (const [j, dev] of deviceList.entries()) {
+    if (!dev?.kd_id) continue;
+    const cmds = await call('GET', `userdevices/custom_commands?kd_id=${dev.kd_id}`, token);
+    await save(`custom_commands-${dev.kd_id}`, cmds.data);
+    shapes.customCommands[`home${i}-device${j}`] = { status: cmds.status, body: keepStrings(cmds.data) };
+  }
 }
 
 await writeFile(join(DEV_DIR, 'shapes.json'), JSON.stringify(shapes, null, 2), { mode: 0o600 });
