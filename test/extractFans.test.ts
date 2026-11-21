@@ -61,6 +61,25 @@ describe('extractFans', () => {
     expect(extractFans(null)).toEqual({ fans: [], skipped: [] });
     expect(extractFans({ rooms: 'x' })).toEqual({ fans: [], skipped: [] });
   });
+
+  test('a fan whose regulator has no valid switch_no is skipped as unsupported', () => {
+    for (const bad of [undefined, 0, -1, 1.5, 'abc']) {
+      const raw = structuredClone(mydevices) as typeof mydevices;
+      (raw.rooms[0].devices[1].switch_appliances[0] as { switch_no?: unknown }).switch_no = bad;
+      const result = extractFans(raw);
+      expect(result.fans.map((f) => f.deviceId)).not.toContain('112233445566');
+      expect(result.skipped).toContainEqual({ name: 'Study Fan', reason: 'unsupported switch layout', deviceId: '112233445566' });
+    }
+  });
+
+  test('an invalid light switch_no keeps the fan, without a light', () => {
+    const raw = structuredClone(mydevices) as typeof mydevices;
+    const light = raw.rooms[0].devices[0].switch_appliances.find((s) => s.feature[0].name === 'fan_light')!;
+    (light as { switch_no?: unknown }).switch_no = 'x';
+    const bedroom = extractFans(raw).fans.find((f) => f.deviceId === 'aabbccddeeff');
+    expect(bedroom).toBeDefined();
+    expect(bedroom).not.toHaveProperty('lightSwitchNo');
+  });
 });
 
 describe('normaliseLocalName', () => {

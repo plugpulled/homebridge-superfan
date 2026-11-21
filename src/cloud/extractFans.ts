@@ -35,6 +35,12 @@ export function normaliseLocalName(name: string): string {
 const featureOf = (s: RawSwitch): unknown => (Array.isArray(s.feature) ? s.feature[0]?.name : undefined);
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v.length > 0 ? v : undefined);
 
+/** A switch number from the cloud: an integer >= 1 (number or numeric string), else undefined. */
+function positiveInt(v: unknown): number | undefined {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
+  return Number.isInteger(n) && n >= 1 ? n : undefined;
+}
+
 /** Pull the supported fans (and their local keys) out of a `userdevices/mydevices` response. */
 export function extractFans(raw: unknown): { fans: FanRecord[]; skipped: SkippedFan[] } {
   const fans: FanRecord[] = [];
@@ -57,7 +63,8 @@ export function extractFans(raw: unknown): { fans: FanRecord[]; skipped: Skipped
     const regulators = switches.filter((s) => featureOf(s) === 'fan_fan' && s.switch_type === 'regulator');
     const lights = switches.filter((s) => featureOf(s) === 'fan_light' && s.switch_type === 'toggle');
     const others = switches.length - regulators.length - lights.length;
-    if (regulators.length !== 1 || lights.length > 1 || others > 0) {
+    const fanSwitchNo = regulators.length === 1 ? positiveInt(regulators[0].switch_no) : undefined;
+    if (regulators.length !== 1 || lights.length > 1 || others > 0 || fanSwitchNo === undefined) {
       skipped.push({ name, reason: 'unsupported switch layout', ...(id ? { deviceId: id } : {}) });
       continue;
     }
@@ -78,11 +85,12 @@ export function extractFans(raw: unknown): { fans: FanRecord[]; skipped: Skipped
       apikey,
       apiSecret,
       localName: normaliseLocalName(str(info.wifi_local_name) ?? `fan_${deviceId}.local`),
-      fanSwitchNo: Number(regulators[0].switch_no) || 1,
+      fanSwitchNo,
       steps: Number.isInteger(steps) && steps > 0 ? steps : DEFAULT_SPEED_STEPS,
     };
-    if (lights.length === 1) {
-      fan.lightSwitchNo = Number(lights[0].switch_no);
+    const lightSwitchNo = lights.length === 1 ? positiveInt(lights[0].switch_no) : undefined;
+    if (lightSwitchNo !== undefined) {
+      fan.lightSwitchNo = lightSwitchNo;
     }
     fans.push(fan);
   }
