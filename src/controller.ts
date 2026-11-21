@@ -35,6 +35,8 @@ export interface FanControllerOptions {
    * on the account. Rejects with CloudAuthError on a wrong password, any other Error on cloud trouble.
    */
   refreshKeys?: () => Promise<FanRecord | undefined>;
+  /** The address the client starts with (undefined if not found yet); used to tell whether a lookup found a new one. */
+  host?: string;
 }
 
 /**
@@ -59,6 +61,9 @@ export class FanController extends EventEmitter implements FanControllerLike {
   private keyRefreshInFlight = false;
   private keyRefreshStopped = false;
   private nextKeyRefreshAt = 0;
+  /** Consecutive failed reads that were "access denied" (any success or other failure resets it). */
+  private consecutive403 = 0;
+  private host?: string;
   private pollTimer?: NodeJS.Timeout;
   private rereadTimer?: NodeJS.Timeout;
   private stopped = false;
@@ -71,6 +76,7 @@ export class FanController extends EventEmitter implements FanControllerLike {
     this.log = options.log;
     this.reresolve = options.reresolve;
     this.refreshKeys = options.refreshKeys;
+    this.host = options.host;
   }
 
   get state(): FanState {
@@ -188,6 +194,7 @@ export class FanController extends EventEmitter implements FanControllerLike {
       await this.onReadFailure(new Error('status reply without the fan relay'));
       return;
     }
+    this.consecutive403 = 0;
     if (this.failures > 0 || !this.current.online) {
       if (!this.current.online) {
         this.log.info(`${this.fan.name} is reachable again`);
@@ -204,6 +211,7 @@ export class FanController extends EventEmitter implements FanControllerLike {
   private async onReadFailure(error: unknown): Promise<void> {
     if (this.stopped) return;
     this.failures++;
+    this.consecutive403 = error instanceof FanHttpError && error.status === 403 ? this.consecutive403 + 1 : 0;
     if (this.failures < OFFLINE_AFTER_FAILURES) {
       return;
     }
@@ -211,12 +219,13 @@ export class FanController extends EventEmitter implements FanControllerLike {
       this.log.warn(`${this.fan.name} is not responding; will keep retrying`);
       this.update({ online: false });
     }
-    // "Access denied" means the address is right but the keys are not (fan re-added in the app).
-    if (this.refreshKeys && error instanceof FanHttpError && error.status === 403) {
+    // Look locally first: a 403 can also come from another device that took over the fan's old address.
+    const moved = await this.tryReresolve();
+    if (this.stopped || moved) return;
+    // Repeated "access denied" at the fan's own address: its keys changed (re-added in the app).
+    if (this.consecutive403 >= OFFLINE_AFTER_FAILURES) {
       this.refreshKeysSoon();
-      return;
     }
-    await this.tryReresolve();
   }
 
   /** Ask the cloud for this fan's keys, at most one request at a time; never blocks polling. */
@@ -231,7 +240,7 @@ export class FanController extends EventEmitter implements FanControllerLike {
   }
 
   private onKeys(latest: FanRecord | undefined): void {
-    if (this.stopped || this.current.online) return; // shut down, or the fan recovered by itself
+    if (this.discardKeyResult()) return;
     if (latest && (latest.apikey !== this.fan.apikey || latest.apiSecret !== this.fan.apiSecret)) {
       this.fan.apikey = latest.apikey;
       this.fan.apiSecret = latest.apiSecret;
@@ -244,7 +253,7 @@ export class FanController extends EventEmitter implements FanControllerLike {
   }
 
   private onKeysFailed(error: unknown): void {
-    if (this.stopped || this.current.online) return;
+    if (this.discardKeyResult()) return;
     if (error instanceof CloudAuthError) {
       this.keyRefreshStopped = true;
       this.log.warn(`${this.fan.name} refused the plugin's keys, and Superfan login failed: check email/password in the plugin settings, then restart Homebridge`);
@@ -254,20 +263,35 @@ export class FanController extends EventEmitter implements FanControllerLike {
     this.log.debug(`${this.fan.name}: could not fetch new keys (${(error as Error).message}); will retry in 30 minutes`);
   }
 
-  private async tryReresolve(): Promise<void> {
-    if (!this.reresolve) return;
+  /** A refresh result arriving after shutdown, or after the fan recovered by itself, is ignored. */
+  private discardKeyResult(): boolean {
+    if (this.stopped) return true;
+    if (this.current.online) {
+      // Still wait before the next refresh, so a fan flapping between 403s and answers can't loop logins.
+      this.nextKeyRefreshAt = Date.now() + KEY_REFRESH_RETRY_MS;
+      return true;
+    }
+    return false;
+  }
+
+  /** Look the fan up locally (rate-limited). Returns true if it was found at a different address. */
+  private async tryReresolve(): Promise<boolean> {
+    if (!this.reresolve) return false;
     const now = Date.now();
-    if (this.lastReresolve !== undefined && now - this.lastReresolve < RERESOLVE_MIN_GAP_MS) return;
+    if (this.lastReresolve !== undefined && now - this.lastReresolve < RERESOLVE_MIN_GAP_MS) return false;
     this.lastReresolve = now;
     try {
       const host = await this.reresolve();
-      if (host && !this.stopped) {
+      if (host && host !== this.host && !this.stopped) {
+        this.host = host;
         this.client.setHost(host);
         this.log.debug(`${this.fan.name}: trying address ${host}`);
+        return true;
       }
     } catch {
       this.log.debug(`${this.fan.name}: address lookup failed`);
     }
+    return false;
   }
 
   private applyStatus(status: FanStatus): void {

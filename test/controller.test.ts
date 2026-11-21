@@ -61,8 +61,11 @@ function make(opts: {
   reresolve?: () => Promise<string | undefined>;
   refreshKeys?: () => Promise<FanRecord | undefined>;
   pollIntervalMs?: number;
+  host?: string;
 } = {}): FanController {
-  ctl = new FanController({ client, fan, pollIntervalMs: opts.pollIntervalMs ?? 5000, log, reresolve: opts.reresolve, refreshKeys: opts.refreshKeys });
+  ctl = new FanController({
+    client, fan, pollIntervalMs: opts.pollIntervalMs ?? 5000, log, reresolve: opts.reresolve, refreshKeys: opts.refreshKeys, host: opts.host,
+  });
   return ctl;
 }
 
@@ -465,6 +468,66 @@ describe('key refresh (re-added fan)', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(swaps()).toEqual([]);
     expect(lines(/new keys/)).toEqual([]);
+  });
+
+  test('a 403 from a moved fan looks it up locally instead of fetching keys (review I1: IP swap)', async () => {
+    const refreshKeys = vi.fn(async () => newKeys);
+    const reresolve = vi.fn(async () => '10.0.0.9');
+    client.status = denied;
+    make({ pollIntervalMs: 1000, refreshKeys, reresolve, host: '10.0.0.5' }).start();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(client.calls).toContainEqual(['setHost', '10.0.0.9']);
+    expect(refreshKeys).not.toHaveBeenCalled();
+  });
+
+  test('a local lookup finding the same address still fetches keys (review I1)', async () => {
+    const refreshKeys = vi.fn(async () => newKeys);
+    const reresolve = vi.fn(async () => '10.0.0.5');
+    client.status = denied;
+    make({ pollIntervalMs: 1000, refreshKeys, reresolve, host: '10.0.0.5' }).start();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(reresolve).toHaveBeenCalledTimes(1);
+    expect(refreshKeys).toHaveBeenCalledTimes(1);
+  });
+
+  test('local lookups keep running after the refresh has stopped (review I1)', async () => {
+    const refreshKeys = vi.fn(async () => fan); // same keys -> refresh stops
+    const reresolve = vi.fn(async () => '10.0.0.5');
+    client.status = denied;
+    make({ pollIntervalMs: 1000, refreshKeys, reresolve, host: '10.0.0.5' }).start();
+    await vi.advanceTimersByTimeAsync(11 * 60_000);
+    expect(refreshKeys).toHaveBeenCalledTimes(1);
+    expect(reresolve.mock.calls.length).toBeGreaterThanOrEqual(3); // at ~2 s, ~5 min, ~10 min
+  });
+
+  test('one 403 after timeouts does not fetch keys (review M1: power cut, then a one-off rejection)', async () => {
+    const refreshKeys = vi.fn(async () => newKeys);
+    client.status = timeout;
+    make({ pollIntervalMs: 1000, refreshKeys }).start();
+    await vi.advanceTimersByTimeAsync(2000); // three timeouts: offline
+    client.status = denied;
+    await vi.advanceTimersByTimeAsync(2000); // one 403
+    client.status = { relays: [1, 0], dimmer: 40 };
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(ctl.state.online).toBe(true);
+    expect(refreshKeys).not.toHaveBeenCalled();
+    expect(lines(/clock/)).toEqual([]);
+  });
+
+  test('a refresh discarded because the fan recovered still waits 30 minutes before the next (review M2)', async () => {
+    const { refreshKeys, resolve } = deferred();
+    client.status = denied;
+    make({ pollIntervalMs: 1000, refreshKeys }).start();
+    await vi.advanceTimersByTimeAsync(2000);
+    client.status = { relays: [1, 0], dimmer: 40 };
+    await vi.advanceTimersByTimeAsync(2000);
+    resolve(newKeys); // discarded: the fan is back
+    await vi.advanceTimersByTimeAsync(0);
+    client.status = denied;
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(refreshKeys).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(25 * 60_000);
+    expect(refreshKeys).toHaveBeenCalledTimes(2);
   });
 });
 

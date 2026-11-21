@@ -371,6 +371,8 @@ describe('SuperfanPlatform', () => {
   function refusedFansSetup(second: () => Promise<{ fans: FanRecord[]; skipped: [] }>) {
     const clients: FakeClient[] = [];
     const deps = makeDeps([fanA, fanB], clients);
+    // Local lookup finds each fan where it already is (the keys changed, not the address).
+    deps.findFanViaMdns = vi.fn(async (id: string) => (id === fanA.deviceId ? '10.0.0.5' : '10.0.0.8'));
     deps.discover = vi.fn()
       .mockResolvedValueOnce({ fans: [fanA, fanB], skipped: [] })
       .mockImplementation(() => new Promise((resolve, reject) => setTimeout(() => second().then(resolve, reject), 2000)));

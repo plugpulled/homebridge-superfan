@@ -267,6 +267,7 @@ export class SuperfanPlatform implements DynamicPlatformPlugin {
       reresolve: override?.host ? undefined : () => this.deps.findFanViaMdns(fan.deviceId),
       // Only on repeated "access denied" (fan re-added in the app), never for an unreachable fan.
       refreshKeys: () => this.refreshKeys(fan.deviceId),
+      host,
     });
     new SuperfanAccessory({
       hap: this.api.hap,

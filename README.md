@@ -88,7 +88,7 @@ Or add this to `config.json`:
 
 **A fan is "skipped"**: your fan reports a switch layout this plugin doesn't support yet. Please open an issue with the log line.
 
-**Removed a fan from your Superfan account?** It disappears from Home the next time Homebridge restarts.
+**Removed a fan from your Superfan account?** It disappears from Home the next time Homebridge restarts. If it was your only fan, the plugin keeps it, in case Superfan's servers reported no fans by mistake. To remove it for good, delete the `superfan` folder in Homebridge's storage folder, remove the fan's cached accessory in the Homebridge UI settings, and restart Homebridge.
 
 **Removed and re-added a fan in the Superfan app?** The fan gets new keys. The plugin notices within a few polls, signs in once to fetch them, and carries on, with no restart needed.
 
