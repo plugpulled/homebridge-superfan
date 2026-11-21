@@ -120,8 +120,9 @@ describe('planAccessories', () => {
 
 class FakeClient {
   calls: string[] = [];
-  host: string;
-  constructor(o: { host: string }) {
+  keyCalls: [string, string][] = [];
+  host: string | undefined;
+  constructor(o: { host?: string }) {
     this.host = o.host;
   }
   async ping() {
@@ -139,6 +140,9 @@ class FakeClient {
   }
   setHost(h: string) {
     this.host = h;
+  }
+  setKeys(apikey: string, apiSecret: string) {
+    this.keyCalls.push([apikey, apiSecret]);
   }
 }
 

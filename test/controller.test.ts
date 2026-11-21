@@ -36,6 +36,9 @@ class FakeClient implements FanClientLike {
   setHost(host: string): void {
     this.calls.push(['setHost', host]);
   }
+  setKeys(apikey: string, apiSecret: string): void {
+    this.calls.push(['setKeys', apikey, apiSecret]);
+  }
   commands(): Call[] {
     return this.calls.filter((c) => c[0] !== 'getStatus');
   }

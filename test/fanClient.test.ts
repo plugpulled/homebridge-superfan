@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { FanClient, FanHttpError, parseStatus, signAuth } from '../src/local/fanClient.js';
 import { json, startFakeFan, text, type FakeFan } from './helpers/fakeFan.js';
 
@@ -16,6 +16,7 @@ async function fakeFan(...args: Parameters<typeof startFakeFan>): Promise<FakeFa
   return f;
 }
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(fans.splice(0).map((f) => f.close()));
 });
 
@@ -164,4 +165,43 @@ describe('FanClient against a fake fan', () => {
     fan.respond = (_req, res) => json(res, 200, { relays: [1] });
     await expect(c.getStatus()).resolves.toEqual({ relays: [1], dimmer: undefined });
   });
+
+  test('getStatus rejects a 200 reply without relays instead of reading all-off', async () => {
+    const fan = await fakeFan((_req, res) => json(res, 200, { ok: true }));
+    await expect(client(fan.host).getStatus()).rejects.toBeInstanceOf(FanHttpError);
+    fan.respond = (_req, res) => text(res, 200, 'OK');
+    await expect(client(fan.host).getStatus()).rejects.toBeInstanceOf(FanHttpError);
+  });
+
+  test('setKeys signs later requests with the new keys', async () => {
+    const fan = await fakeFan();
+    const c = client(fan.host);
+    c.setKeys('ak_new_321', 'sk_new_789');
+    await c.getStatus();
+    expect(fan.requests[0].query.get('apikey')).toBe('ak_new_321');
+    // Hand-computed: HMAC-SHA256(key="sk_new_789", msg="950001234,ak_new_321")
+    expect(fan.requests[0].query.get('meta')).toBe('ff3c326afaeb46d823e553724cd1497fb404e2e7ef5f3da70eba659386ca5c6f');
+  });
+
+  test('a client without an address rejects with status 0 until setHost', async () => {
+    const fan = await fakeFan();
+    const c = new FanClient({ apikey: AK, apiSecret: SK, now: () => NOW });
+    const err = await c.getStatus().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(FanHttpError);
+    expect((err as FanHttpError).status).toBe(0);
+    expect((err as Error).message).toMatch(/not known yet/); // fails fast, no request to "undefined"
+    c.setHost(fan.host);
+    await expect(c.getStatus()).resolves.toEqual({ relays: [0, 0], dimmer: undefined });
+  });
+
+  test('a backward wall-clock jump does not stall requests', async () => {
+    const fan = await fakeFan();
+    const c = client(fan.host);
+    const now = vi.spyOn(Date, 'now').mockReturnValue(10_000_000_000_000);
+    await c.getStatus();
+    now.mockReturnValue(10_000_000_000_000 - 3_600_000); // clock set back one hour
+    const started = performance.now();
+    await c.getStatus();
+    expect(performance.now() - started).toBeLessThan(1000);
+  }, 3000);
 });

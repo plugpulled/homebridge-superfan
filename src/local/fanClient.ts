@@ -43,7 +43,8 @@ export function parseStatus(body: unknown): FanStatus {
 }
 
 export interface FanClientOptions {
-  host: string;
+  /** Fan address; may be unknown until it is found on the network (see `setHost`). */
+  host?: string;
   apikey: string;
   apiSecret: string;
   timeoutMs?: number;
@@ -53,13 +54,14 @@ export interface FanClientOptions {
 
 /** Signed HTTP client for one fan. Requests are serialised: at most one is in flight. */
 export class FanClient {
-  private host: string;
-  private readonly apikey: string;
-  private readonly apiSecret: string;
+  private host: string | undefined;
+  private apikey: string;
+  private apiSecret: string;
   private readonly timeoutMs: number;
   private readonly now: () => number;
   private chain: Promise<unknown> = Promise.resolve();
-  private lastStart = 0;
+  /** Start time of the last request, on a monotonic clock (wall-clock jumps must not stall requests). */
+  private lastStart = -Infinity;
 
   constructor(options: FanClientOptions) {
     this.host = options.host;
@@ -73,8 +75,14 @@ export class FanClient {
     this.host = host;
   }
 
+  /** Use new local keys (the fan was re-added in the Superfan app). Applies to requests not yet sent. */
+  setKeys(apikey: string, apiSecret: string): void {
+    this.apikey = apikey;
+    this.apiSecret = apiSecret;
+  }
+
   async ping(): Promise<PingInfo> {
-    const body = await this.enqueue('GET', '/ping', false);
+    const { body } = await this.enqueue('GET', '/ping', false);
     const obj = typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
     return {
       version: String(obj.version ?? ''),
@@ -84,7 +92,12 @@ export class FanClient {
   }
 
   async getStatus(): Promise<FanStatus> {
-    return parseStatus(await this.enqueue('GET', '/api/switch', true));
+    const { status, body } = await this.enqueue('GET', '/api/switch', true);
+    // A reply without relay states must count as a failed read, never as "everything off".
+    if (typeof body !== 'object' || body === null || !Array.isArray((body as Record<string, unknown>).relays)) {
+      throw new FanHttpError(status, `Fan at ${this.host} sent a status reply without relay states`);
+    }
+    return parseStatus(body);
   }
 
   async setRelay(switchNo: number, on: boolean): Promise<FanStatus | undefined> {
@@ -97,24 +110,27 @@ export class FanClient {
   }
 
   private async command(form: string): Promise<FanStatus | undefined> {
-    const body = await this.enqueue('POST', '/api/switch', true, form);
+    const { body } = await this.enqueue('POST', '/api/switch', true, form);
     const hasRelays = typeof body === 'object' && body !== null && Array.isArray((body as Record<string, unknown>).relays);
     return hasRelays ? parseStatus(body) : undefined;
   }
 
-  private enqueue(method: 'GET' | 'POST', path: string, auth: boolean, form?: string): Promise<unknown> {
+  private enqueue(method: 'GET' | 'POST', path: string, auth: boolean, form?: string): Promise<{ status: number; body: unknown }> {
     const run = this.chain.then(() => this.send(method, path, auth, form));
     // Keep the queue alive regardless of this request's outcome.
     this.chain = run.catch(() => undefined);
     return run;
   }
 
-  private async send(method: 'GET' | 'POST', path: string, auth: boolean, form?: string): Promise<unknown> {
-    const wait = this.lastStart + MIN_REQUEST_SPACING_MS - Date.now();
+  private async send(method: 'GET' | 'POST', path: string, auth: boolean, form?: string): Promise<{ status: number; body: unknown }> {
+    if (!this.host) {
+      throw new FanHttpError(0, 'Address of the fan is not known yet');
+    }
+    const wait = this.lastStart + MIN_REQUEST_SPACING_MS - performance.now();
     if (wait > 0) {
       await new Promise((resolve) => setTimeout(resolve, wait));
     }
-    this.lastStart = Date.now();
+    this.lastStart = performance.now();
 
     let url = `http://${this.host}${path}`;
     if (auth) {
@@ -138,12 +154,14 @@ export class FanClient {
     if (!response.ok) {
       throw new FanHttpError(response.status, `Fan at ${this.host} returned HTTP ${response.status} for ${method} ${path}`);
     }
+    let body: unknown = text;
     try {
-      return JSON.parse(text) as unknown;
+      body = JSON.parse(text) as unknown;
     } catch {
-      return text;
+      // not JSON: keep the text
     }
+    return { status: response.status, body };
   }
 }
 
-export type FanClientLike = Pick<FanClient, 'getStatus' | 'setRelay' | 'setDimmer' | 'setHost'>;
+export type FanClientLike = Pick<FanClient, 'getStatus' | 'setRelay' | 'setDimmer' | 'setHost' | 'setKeys'>;
