@@ -46,6 +46,8 @@ export class FanController extends EventEmitter implements FanControllerLike {
   private failures = 0;
   private commandSeq = 0;
   private commandsInFlight = 0;
+  /** Bumped by every command's optimistic update; a failed command only rolls back if no newer one followed. */
+  private optimisticSeq = 0;
   private lastReresolve?: number;
   private pollTimer?: NodeJS.Timeout;
   private rereadTimer?: NodeJS.Timeout;
@@ -79,8 +81,7 @@ export class FanController extends EventEmitter implements FanControllerLike {
     this.assertOnline();
     // Always send: the cached state may be stale (e.g. the remote was used since the last poll).
     // A repeated relay-on during a speed change is harmless.
-    this.update({ fanOn: on });
-    await this.command(() => this.client.setRelay(this.fan.fanSwitchNo, on));
+    await this.optimistic({ fanOn: on }, () => this.client.setRelay(this.fan.fanSwitchNo, on));
   }
 
   async setSpeed(speed: number): Promise<void> {
@@ -89,8 +90,7 @@ export class FanController extends EventEmitter implements FanControllerLike {
       return this.setFanOn(false);
     }
     const wasOn = this.current.fanOn;
-    this.update({ speed, fanOn: true });
-    await this.command(async () => {
+    await this.optimistic({ speed, fanOn: true }, async () => {
       await this.client.setDimmer(this.fan.fanSwitchNo, toDimm(speed, this.fan.steps));
       if (!wasOn) {
         await this.client.setRelay(this.fan.fanSwitchNo, true);
@@ -104,13 +104,27 @@ export class FanController extends EventEmitter implements FanControllerLike {
     if (lightSwitchNo === undefined) {
       return;
     }
-    this.update({ lightOn: on });
-    await this.command(() => this.client.setRelay(lightSwitchNo, on));
+    await this.optimistic({ lightOn: on }, () => this.client.setRelay(lightSwitchNo, on));
   }
 
   private assertOnline(): void {
     if (!this.current.online) {
       throw new OfflineError(this.fan.name);
+    }
+  }
+
+  /** Show `patch` right away, send the command, and put the old values back if it fails. */
+  private async optimistic(patch: Partial<FanState>, send: () => Promise<unknown>): Promise<void> {
+    const before = Object.fromEntries(Object.keys(patch).map((k) => [k, this.current[k as keyof FanState]])) as Partial<FanState>;
+    const mine = ++this.optimisticSeq;
+    this.update(patch);
+    try {
+      await this.command(send);
+    } catch (error) {
+      if (this.optimisticSeq === mine) {
+        this.update(before);
+      }
+      throw error;
     }
   }
 
@@ -158,6 +172,11 @@ export class FanController extends EventEmitter implements FanControllerLike {
       return;
     }
     if (this.stopped) return;
+    if (status.relays[this.fan.fanSwitchNo - 1] === undefined) {
+      // A reply that doesn't say whether the fan is on is not "off": count it as a failed read.
+      await this.onReadFailure();
+      return;
+    }
     if (this.failures > 0 || !this.current.online) {
       if (!this.current.online) {
         this.log.info(`${this.fan.name} is reachable again`);

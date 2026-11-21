@@ -107,6 +107,15 @@ describe('polling and state', () => {
     await vi.advanceTimersByTimeAsync(5000);
     expect(ctl.state).toMatchObject({ fanOn: true, lightOn: false, speed: 2 });
   });
+
+  test("a reply without the fan's relay counts as a failed read, not \"off\"", async () => {
+    await startWith({ relays: [1, 0], dimmer: 40 }, { pollIntervalMs: 1000 });
+    client.status = { relays: [] };
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(ctl.state).toMatchObject({ online: true, fanOn: true });
+    await vi.advanceTimersByTimeAsync(2000); // 3rd bad reply
+    expect(ctl.state.online).toBe(false);
+  });
 });
 
 describe('commands', () => {
@@ -245,6 +254,27 @@ describe('commands', () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(client.calls.at(-1)).toEqual(['getStatus']);
     expect(ctl.state.fanOn).toBe(false);
+  });
+
+  test('a failed command puts the tile back right away', async () => {
+    await startWith({ relays: [0, 0], dimmer: 20 });
+    const changes: FanState[] = [];
+    ctl.on('change', (s) => changes.push({ ...s }));
+    client.commandError = new Error('boom');
+    await expect(ctl.setSpeed(3)).rejects.toThrow('boom');
+    expect(ctl.state).toMatchObject({ fanOn: false, speed: 1 });
+    expect(changes.at(-1)).toMatchObject({ fanOn: false, speed: 1 });
+  });
+
+  test('a failed command does not undo a newer one', async () => {
+    await startWith({ relays: [0, 0], dimmer: 20 });
+    client.commandError = new Error('boom');
+    const first = ctl.setFanOn(true);
+    client.commandError = undefined;
+    const second = ctl.setSpeed(3);
+    await expect(first).rejects.toThrow('boom');
+    await second;
+    expect(ctl.state).toMatchObject({ fanOn: true, speed: 3 });
   });
 });
 
