@@ -1,7 +1,7 @@
 {
   "name": "homebridge-superfan",
   "displayName": "Homebridge Superfan",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Control Superfan smart fans from Apple Home over your local network (unofficial).",
   "author": "Hanif Roshan",
   "license": "MIT",
@@ -15,6 +15,7 @@
   },
   "keywords": [
     "homebridge-plugin",
+    "supports-hap",
     "superfan",
     "kiot",
     "fan"

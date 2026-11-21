@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2
+
+No changes to how the plugin works.
+
+- Declares that it publishes accessories over HomeKit (HAP), as Homebridge's plugin listing expects.
+- Tested on Node.js 22, 24 and 26.
+
 ## 0.1.1
 
 Fixes for every known issue in 0.1.0. No new settings.
