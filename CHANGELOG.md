@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.1
+
+Fixes for every known issue in 0.1.0. No new settings.
+
+- A fan removed and re-added in the My Superfan app reconnects by itself: the plugin signs in once to fetch its new keys, with no restart needed.
+- A fan that can't be found at startup still appears in Home (as "No Response") and connects once it's found, without a restart.
+- A problem setting up one fan no longer stops the other fans.
+- A failed command puts the tile straight back to the fan's real state.
+- An odd status reply from a fan counts as a failed check, never as "off".
+- Unusual switch numbers from Superfan's servers are checked instead of guessed.
+- Requests to a fan keep flowing if the server's clock is set back.
+- Smaller package (no source maps). README: Node.js 22.12 or newer, and notes on removing or re-adding fans.
+
 ## 0.1.0
 
 First release.
