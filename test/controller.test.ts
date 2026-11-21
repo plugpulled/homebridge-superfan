@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { FanController, OfflineError } from '../src/controller.js';
-import type { FanClientLike } from '../src/local/fanClient.js';
+import { CloudAuthError } from '../src/cloud/kiotCloud.js';
+import { FanHttpError, type FanClientLike } from '../src/local/fanClient.js';
 import type { FanRecord, FanState, FanStatus, Logger } from '../src/types.js';
 
 const fan: FanRecord = {
@@ -56,8 +57,12 @@ let client: FakeClient;
 let log: ReturnType<typeof spyLog>;
 let ctl: FanController;
 
-function make(opts: { reresolve?: () => Promise<string | undefined>; pollIntervalMs?: number } = {}): FanController {
-  ctl = new FanController({ client, fan, pollIntervalMs: opts.pollIntervalMs ?? 5000, log, reresolve: opts.reresolve });
+function make(opts: {
+  reresolve?: () => Promise<string | undefined>;
+  refreshKeys?: () => Promise<FanRecord | undefined>;
+  pollIntervalMs?: number;
+} = {}): FanController {
+  ctl = new FanController({ client, fan, pollIntervalMs: opts.pollIntervalMs ?? 5000, log, reresolve: opts.reresolve, refreshKeys: opts.refreshKeys });
   return ctl;
 }
 
@@ -332,6 +337,134 @@ describe('offline handling', () => {
     make({ pollIntervalMs: 1000, reresolve: async () => undefined }).start();
     await vi.advanceTimersByTimeAsync(2000);
     expect(client.calls.filter((c) => c[0] === 'setHost')).toEqual([]);
+  });
+});
+
+describe('key refresh (re-added fan)', () => {
+  const denied = new FanHttpError(403, 'denied');
+  const timeout = new FanHttpError(0, 'timeout');
+  const newKeys: FanRecord = { ...fan, apikey: 'ak_new', apiSecret: 'sk_new' };
+  const HOUR = 60 * 60_000;
+  const deferred = () => {
+    let resolve!: (r: FanRecord | undefined) => void;
+    const refreshKeys = vi.fn(() => new Promise<FanRecord | undefined>((r) => (resolve = r)));
+    return { refreshKeys, resolve: (r: FanRecord | undefined) => resolve(r) };
+  };
+  const swaps = () => client.calls.filter((c) => c[0] === 'setKeys');
+  const lines = (re: RegExp) => log.all().filter((m) => re.test(m));
+
+  test('three 403s in a row fetch new keys once and the fan recovers without restart', async () => {
+    const refreshKeys = vi.fn(async () => newKeys);
+    client.status = denied;
+    make({ pollIntervalMs: 1000, refreshKeys }).start();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(refreshKeys).toHaveBeenCalledTimes(1);
+    expect(client.calls).toContainEqual(['setKeys', 'ak_new', 'sk_new']);
+    client.status = { relays: [1, 0], dimmer: 40 };
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(ctl.state.online).toBe(true);
+    expect(log.all().join('\n')).toMatch(/picked up new keys/);
+    expect(log.all().join('\n')).not.toMatch(/ak_new|sk_new|ak_fake|sk_fake/);
+  });
+
+  test('a single 403 does not fetch keys', async () => {
+    const refreshKeys = vi.fn(async () => newKeys);
+    client.status = denied;
+    make({ pollIntervalMs: 1000, refreshKeys }).start();
+    await vi.advanceTimersByTimeAsync(0);
+    client.status = { relays: [1, 0], dimmer: 40 };
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(refreshKeys).not.toHaveBeenCalled();
+  });
+
+  test('an unplugged fan (timeouts) never fetches keys', async () => {
+    const refreshKeys = vi.fn(async () => newKeys);
+    client.status = timeout;
+    make({ pollIntervalMs: 1000, refreshKeys }).start();
+    await vi.advanceTimersByTimeAsync(HOUR);
+    expect(refreshKeys).not.toHaveBeenCalled();
+  });
+
+  test('403 then timeout: only the latest failure counts (Review Focus 1)', async () => {
+    const refreshKeys = vi.fn(async () => newKeys);
+    client.status = denied;
+    make({ pollIntervalMs: 1000, refreshKeys }).start();
+    await vi.advanceTimersByTimeAsync(1000); // two 403s
+    client.status = timeout;
+    await vi.advanceTimersByTimeAsync(1000); // 3rd failure is a timeout
+    expect(ctl.state.online).toBe(false);
+    await vi.advanceTimersByTimeAsync(HOUR);
+    expect(refreshKeys).not.toHaveBeenCalled();
+  });
+
+  test('same keys: one clock warning, then no more refreshes until restart', async () => {
+    const refreshKeys = vi.fn(async () => fan);
+    client.status = denied;
+    make({ pollIntervalMs: 1000, refreshKeys }).start();
+    await vi.advanceTimersByTimeAsync(HOUR);
+    expect(refreshKeys).toHaveBeenCalledTimes(1);
+    expect(swaps()).toEqual([]);
+    expect(lines(/clock/)).toHaveLength(1);
+  });
+
+  test('fan no longer on the account behaves like same keys', async () => {
+    const refreshKeys = vi.fn(async () => undefined);
+    client.status = denied;
+    make({ pollIntervalMs: 1000, refreshKeys }).start();
+    await vi.advanceTimersByTimeAsync(HOUR);
+    expect(refreshKeys).toHaveBeenCalledTimes(1);
+    expect(lines(/clock/)).toHaveLength(1);
+  });
+
+  test('wrong password: one warning, then no more refreshes', async () => {
+    const refreshKeys = vi.fn(async (): Promise<FanRecord | undefined> => {
+      throw new CloudAuthError('Superfan login failed (HTTP 401)');
+    });
+    client.status = denied;
+    make({ pollIntervalMs: 1000, refreshKeys }).start();
+    await vi.advanceTimersByTimeAsync(HOUR);
+    expect(refreshKeys).toHaveBeenCalledTimes(1);
+    expect(lines(/email\/password/)).toHaveLength(1);
+  });
+
+  test('cloud trouble retries no sooner than 30 minutes', async () => {
+    const refreshKeys = vi.fn(async (): Promise<FanRecord | undefined> => {
+      throw new Error('HTTP 500');
+    });
+    client.status = denied;
+    make({ pollIntervalMs: 1000, refreshKeys }).start();
+    await vi.advanceTimersByTimeAsync(29 * 60_000);
+    expect(refreshKeys).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(3 * 60_000);
+    expect(refreshKeys).toHaveBeenCalledTimes(2);
+  });
+
+  test('a refresh that finishes after the fan recovered changes nothing (Review Focus 2)', async () => {
+    const { refreshKeys, resolve } = deferred();
+    client.status = denied;
+    make({ pollIntervalMs: 1000, refreshKeys }).start();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(refreshKeys).toHaveBeenCalledTimes(1);
+    client.status = { relays: [1, 0], dimmer: 40 };
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(ctl.state.online).toBe(true);
+    resolve(newKeys);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(swaps()).toEqual([]);
+    expect(lines(/new keys/)).toEqual([]);
+  });
+
+  test('stop() during a refresh: no key swap, no log (Review Focus 3)', async () => {
+    const { refreshKeys, resolve } = deferred();
+    client.status = denied;
+    make({ pollIntervalMs: 1000, refreshKeys }).start();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(refreshKeys).toHaveBeenCalledTimes(1);
+    ctl.stop();
+    resolve(newKeys);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(swaps()).toEqual([]);
+    expect(lines(/new keys/)).toEqual([]);
   });
 });
 
