@@ -9,13 +9,13 @@ export async function readCache(path: string): Promise<CacheData | undefined> {
     if (data?.version !== 1 || !Array.isArray(data.fans)) {
       return undefined;
     }
-    return { version: 1, refreshToken: data.refreshToken, fans: data.fans, lastHosts: data.lastHosts ?? {} };
+    return { version: 1, fans: data.fans, lastHosts: data.lastHosts ?? {} };
   } catch {
     return undefined;
   }
 }
 
-/** Atomically write the cache with owner-only permissions (it holds tokens and device keys). */
+/** Atomically write the cache with owner-only permissions (it holds device keys). */
 export async function writeCache(path: string, data: CacheData): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const tmp = `${path}.tmp`;

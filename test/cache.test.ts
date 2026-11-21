@@ -15,7 +15,6 @@ afterEach(async () => {
 
 const sample: CacheData = {
   version: 1,
-  refreshToken: 'r1',
   fans: [{
     deviceId: 'aabbccddeeff', name: 'Bedroom Fan', model: 'Superfan Super Q', apikey: 'ak_fake', apiSecret: 'sk_fake',
     localName: 'fan_aabbccddeeff.local', fanSwitchNo: 1, steps: 5, lightSwitchNo: 2,
@@ -50,5 +49,11 @@ describe('cache', () => {
     expect(await readCache(join(dir, 'bad.json'))).toBeUndefined();
     await writeFile(join(dir, 'v2.json'), JSON.stringify({ ...sample, version: 2 }));
     expect(await readCache(join(dir, 'v2.json'))).toBeUndefined();
+  });
+
+  test('a 0.1.0 cache with a leftover refreshToken still loads, without that field', async () => {
+    const p = join(dir, 'old.json');
+    await writeFile(p, JSON.stringify({ ...sample, refreshToken: 'r1' }));
+    expect(await readCache(p)).toEqual(sample);
   });
 });

@@ -34,7 +34,6 @@ export interface FanState {
 
 export interface CacheData {
   version: 1;
-  refreshToken?: string;
   fans: FanRecord[];
   lastHosts: Record<string, string>;
 }

@@ -20,7 +20,7 @@ Superfan's own app works with Google Home and Alexa, but not Apple Home. This pl
 
 ## Requirements
 
-- Homebridge 1.8 or newer (2.x supported), Node.js 22 or newer
+- Homebridge 1.8 or newer (2.x supported), Node.js 22.12 or newer
 - Your fan already set up in the **My Superfan** app and connected to your Wi-Fi
 - Homebridge on the **same network** as the fans
 - A Superfan account that signs in with **email and password**
@@ -87,6 +87,10 @@ Or add this to `config.json`:
 **Fan shows "No Response" in Home**: the fan isn't answering on the network. This happens, for example, when it's switched off at the wall. It recovers automatically within about 30 seconds of coming back.
 
 **A fan is "skipped"**: your fan reports a switch layout this plugin doesn't support yet. Please open an issue with the log line.
+
+**Removed a fan from your Superfan account?** It disappears from Home the next time Homebridge restarts.
+
+**Removed and re-added a fan in the Superfan app?** The fan gets new keys. The plugin notices within a few polls, signs in once to fetch them, and carries on, with no restart needed.
 
 ## Privacy and security
 
