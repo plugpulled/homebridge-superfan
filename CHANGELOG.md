@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.3
+
+No changes to how the plugin works.
+
+- Settings form: required fields are now declared the standard JSON Schema way, as Homebridge's verification checks expect. Email and password are still required.
+
 ## 0.1.2
 
 No changes to how the plugin works.

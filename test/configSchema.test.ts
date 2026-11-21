@@ -17,6 +17,19 @@ describe('config.schema.json', () => {
     expect(schema.schema.properties.password['x-schema-form']).toEqual({ type: 'password' });
   });
 
+  test('marks required fields only with object-level arrays (Homebridge verification check)', () => {
+    const booleanRequired: string[] = [];
+    const walk = (node: unknown, path: string): void => {
+      if (!node || typeof node !== 'object') return;
+      for (const [key, value] of Object.entries(node)) {
+        if (key === 'required' && !Array.isArray(value)) booleanRequired.push(path || '/');
+        walk(value, `${path}/${key}`);
+      }
+    };
+    walk(schema.schema, '');
+    expect(booleanRequired).toEqual([]);
+  });
+
   test('offers the per-device overrides parseConfig understands', () => {
     expect(Object.keys(schema.schema.properties.devices.items.properties).sort()).toEqual(['deviceId', 'host', 'model']);
   });

@@ -14,13 +14,11 @@
       "email": {
         "title": "Superfan email",
         "type": "string",
-        "format": "email",
-        "required": true
+        "format": "email"
       },
       "password": {
         "title": "Superfan password",
         "type": "string",
-        "required": true,
         "x-schema-form": {
           "type": "password"
         }
