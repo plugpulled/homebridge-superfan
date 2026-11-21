@@ -45,6 +45,12 @@ class FakeClient implements FanClientLike {
   }
 }
 
+/** True if a fan "on" was sent after a speed command (the firmware then falls back to the old speed). */
+function onAfterSpeed(calls: Call[]): boolean {
+  const firstDimmer = calls.findIndex((c) => c[0] === 'setDimmer');
+  return firstDimmer >= 0 && calls.slice(firstDimmer + 1).some((c) => c[0] === 'setRelay' && c[1] === 1 && c[2] === true);
+}
+
 function spyLog(): Logger & { all: () => string[] } {
   const msgs: string[] = [];
   const rec = vi.fn((m: string) => {
@@ -144,10 +150,10 @@ describe('commands', () => {
     expect(client.commands()).toEqual([['setDimmer', 1, 60]]);
   });
 
-  test('setSpeed while off sets the dimmer then turns the fan on', async () => {
+  test('setSpeed while off turns the fan on first, then sets the speed (firmware falls back otherwise)', async () => {
     await startWith({ relays: [0, 0], dimmer: 20 });
     await ctl.setSpeed(3);
-    expect(client.commands()).toEqual([['setDimmer', 1, 60], ['setRelay', 1, true]]);
+    expect(client.commands()).toEqual([['setRelay', 1, true], ['setDimmer', 1, 60]]);
     expect(ctl.state).toMatchObject({ fanOn: true, speed: 3 });
   });
 
@@ -165,16 +171,51 @@ describe('commands', () => {
     expect(calls).toContainEqual(['setDimmer', 1, 60]);
     expect(calls.filter((c) => c[0] === 'setRelay' && c[1] === 1 && c[2] === false)).toHaveLength(0);
     expect(calls.filter((c) => c[0] === 'setRelay' && c[1] === 1 && c[2] === true).length).toBeLessThanOrEqual(1);
+    expect(onAfterSpeed(calls)).toBe(false);
     expect(ctl.state).toMatchObject({ fanOn: true, speed: 3 });
   });
 
-  test('burst in the other order also ends on at speed 3', async () => {
+  test('burst in the other order also ends on at speed 3, never sending "on" after the speed', async () => {
     await startWith({ relays: [0, 0], dimmer: 20 });
     await Promise.all([ctl.setSpeed(3), ctl.setFanOn(true)]);
     const calls = client.commands();
     expect(calls.filter((c) => c[0] === 'setRelay' && c[1] === 1 && c[2] === true).length).toBeGreaterThanOrEqual(1);
     expect(calls.filter((c) => c[0] === 'setRelay' && c[2] === false)).toHaveLength(0);
+    expect(onAfterSpeed(calls)).toBe(false);
     expect(ctl.state).toMatchObject({ fanOn: true, speed: 3 });
+  });
+
+  // Firmware 4.2.0: a relay "on" within ~2-3 s of a speed change makes the fan fall back to its
+  // previous speed a few seconds later (verified on a real fan). HomeKit sends voice and scene
+  // speed changes as "speed, then on".
+  test('a "turn on" right after a speed change is not sent (Siri: speed, then on)', async () => {
+    await startWith({ relays: [1, 0], dimmer: 20 });
+    await ctl.setSpeed(3);
+    await ctl.setFanOn(true);
+    expect(client.commands()).toEqual([['setDimmer', 1, 60]]);
+    expect(ctl.state).toMatchObject({ fanOn: true, speed: 3 });
+  });
+
+  test('same when HomeKit sends speed and "on" together', async () => {
+    await startWith({ relays: [1, 0], dimmer: 20 });
+    await Promise.all([ctl.setSpeed(3), ctl.setFanOn(true)]);
+    expect(client.commands()).toEqual([['setDimmer', 1, 60]]);
+  });
+
+  test('a "turn on" 5 s after a speed change is sent normally', async () => {
+    await startWith({ relays: [1, 0], dimmer: 20 });
+    await ctl.setSpeed(3);
+    await vi.advanceTimersByTimeAsync(5000);
+    await ctl.setFanOn(true);
+    expect(client.commands().at(-1)).toEqual(['setRelay', 1, true]);
+  });
+
+  test('turning off and on again right after a speed change still switches the fan on', async () => {
+    await startWith({ relays: [1, 0], dimmer: 20 });
+    await ctl.setSpeed(3);
+    await ctl.setFanOn(false);
+    await ctl.setFanOn(true);
+    expect(client.commands()).toEqual([['setDimmer', 1, 60], ['setRelay', 1, false], ['setRelay', 1, true]]);
   });
 
   test('"turn on" is sent even when the cached state already says on (review M1)', async () => {

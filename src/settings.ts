@@ -12,6 +12,11 @@ export const DEFAULT_SPEED_STEPS = 5;
 export const OFFLINE_AFTER_FAILURES = 3;
 export const OFFLINE_BACKOFF_CAP_MS = 30_000;
 export const REREAD_AFTER_COMMAND_MS = 1_000;
+/**
+ * After a speed change, the fan firmware treats a relay "on" as "restore the saved speed" until the
+ * new speed has settled (~2-3 s), so it falls back to the old speed. Skip "on" for this long after one.
+ */
+export const SPEED_SETTLE_MS = 5_000;
 /** After cloud trouble while fetching a re-added fan's new keys, wait this long before trying again. */
 export const KEY_REFRESH_RETRY_MS = 30 * 60_000;
 

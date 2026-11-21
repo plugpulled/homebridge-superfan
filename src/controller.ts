@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { CloudAuthError } from './cloud/kiotCloud.js';
 import { FanHttpError, type FanClientLike } from './local/fanClient.js';
-import { KEY_REFRESH_RETRY_MS, OFFLINE_AFTER_FAILURES, OFFLINE_BACKOFF_CAP_MS, REREAD_AFTER_COMMAND_MS } from './settings.js';
+import { KEY_REFRESH_RETRY_MS, OFFLINE_AFTER_FAILURES, OFFLINE_BACKOFF_CAP_MS, REREAD_AFTER_COMMAND_MS, SPEED_SETTLE_MS } from './settings.js';
 import { fromDimm, toDimm } from './speed.js';
 import type { FanRecord, FanState, FanStatus, Logger } from './types.js';
 
@@ -64,6 +64,8 @@ export class FanController extends EventEmitter implements FanControllerLike {
   /** Consecutive failed reads that were "access denied" (any success or other failure resets it). */
   private consecutive403 = 0;
   private host?: string;
+  /** When the last speed command was sent (cleared by "off"); see SPEED_SETTLE_MS. */
+  private lastSpeedCommandAt?: number;
   private pollTimer?: NodeJS.Timeout;
   private rereadTimer?: NodeJS.Timeout;
   private stopped = false;
@@ -96,6 +98,15 @@ export class FanController extends EventEmitter implements FanControllerLike {
 
   async setFanOn(on: boolean): Promise<void> {
     this.assertOnline();
+    if (on && this.speedSettling()) {
+      // A speed command was just sent and already keeps the fan running (it even starts a stopped fan).
+      // Sending "on" now would make the firmware fall back to the previous speed.
+      this.update({ fanOn: true });
+      return;
+    }
+    if (!on) {
+      this.lastSpeedCommandAt = undefined; // after "off", a following "on" must be sent
+    }
     // Always send: the cached state may be stale (e.g. the remote was used since the last poll).
     // A repeated relay-on during a speed change is harmless.
     await this.optimistic({ fanOn: on }, () => this.client.setRelay(this.fan.fanSwitchNo, on));
@@ -107,11 +118,13 @@ export class FanController extends EventEmitter implements FanControllerLike {
       return this.setFanOn(false);
     }
     const wasOn = this.current.fanOn;
+    this.lastSpeedCommandAt = Date.now();
     await this.optimistic({ speed, fanOn: true }, async () => {
-      await this.client.setDimmer(this.fan.fanSwitchNo, toDimm(speed, this.fan.steps));
+      // "On" first, then the speed: the other order makes the firmware fall back to the old speed.
       if (!wasOn) {
         await this.client.setRelay(this.fan.fanSwitchNo, true);
       }
+      await this.client.setDimmer(this.fan.fanSwitchNo, toDimm(speed, this.fan.steps));
     });
   }
 
@@ -122,6 +135,10 @@ export class FanController extends EventEmitter implements FanControllerLike {
       return;
     }
     await this.optimistic({ lightOn: on }, () => this.client.setRelay(lightSwitchNo, on));
+  }
+
+  private speedSettling(): boolean {
+    return this.lastSpeedCommandAt !== undefined && Date.now() - this.lastSpeedCommandAt < SPEED_SETTLE_MS;
   }
 
   private assertOnline(): void {

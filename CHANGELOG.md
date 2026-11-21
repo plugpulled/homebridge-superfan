@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.4
+
+- Fixed: changing the speed by voice or with a scene ("Hey Siri, increase fan speed", "set the fan to 66%") could make the fan fall back to its previous speed a few seconds later. Home sends these as "speed, then on", and the fan's firmware treats an "on" right after a speed change as "restore the old speed". The plugin now never sends "on" within 5 seconds of a speed change, and when the fan is off it sends "on" before the speed.
+
 ## 0.1.3
 
 No changes to how the plugin works.
