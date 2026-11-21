@@ -5,9 +5,11 @@ import { join } from 'node:path';
 import * as hap from '@homebridge/hap-nodejs';
 import type { API, Logging, PlatformConfig } from 'homebridge';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { chmod, mkdir } from 'node:fs/promises';
 import { readCache, writeCache } from '../src/cache.js';
 import { CloudAuthError } from '../src/cloud/kiotCloud.js';
 import { FanController } from '../src/controller.js';
+import { FanHttpError } from '../src/local/fanClient.js';
 import { ConfigError, loadFans, parseConfig, planAccessories, SuperfanPlatform, type PlatformDeps } from '../src/platform.js';
 import type { FanRecord, FanStatus } from '../src/types.js';
 
@@ -128,9 +130,12 @@ class FakeClient {
   async ping() {
     return { version: '4.2.0', deviceId: 'x', hostname: 'x' };
   }
+  status: FanStatus | Error = { relays: [1], dimmer: 66 };
   async getStatus(): Promise<FanStatus> {
     this.calls.push('getStatus');
-    return { relays: [1], dimmer: 66 };
+    if (!this.host) throw new FanHttpError(0, 'no address');
+    if (this.status instanceof Error) throw this.status;
+    return this.status;
   }
   async setRelay() {
     return undefined;
@@ -306,6 +311,152 @@ describe('SuperfanPlatform', () => {
       expect(vi.mocked(deps.findFanViaMdns).mock.calls.length).toBeGreaterThan(0); // still looks locally
       api.emit('shutdown');
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('one fan failing setup does not stop the others (minor #4)', async () => {
+    const api = fakeApi();
+    const { log, msgs } = spyLog();
+    const clients: FakeClient[] = [];
+    const deps = makeDeps([fanA, fanB], clients);
+    const create = deps.createClient;
+    deps.createClient = (o) => {
+      if (o.apikey === 'ak_fake_a') throw new Error('kaboom');
+      return create(o);
+    };
+    new SuperfanPlatform(log, config, api, deps);
+    api.emit('didFinishLaunching');
+    await vi.waitFor(() => expect(api.registerPlatformAccessories).toHaveBeenCalledTimes(1));
+    const accessories = api.registerPlatformAccessories.mock.calls[0][2];
+    expect(accessories.map((a: { UUID: string }) => a.UUID)).toEqual([hap.uuid.generate('superfan:112233445566')]);
+    const errors = msgs.filter((m) => m.level === 'error');
+    expect(errors).toHaveLength(1);
+    expect(errors[0].msg).toMatch(/Bedroom Fan/);
+    expect(errors[0].msg).toMatch(/aabbccddeeff/);
+    api.emit('shutdown');
+  });
+
+  test('a fan not found at startup is still added, shows No Response, and is picked up once found (minor #5)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const api = fakeApi();
+      const { log, msgs } = spyLog();
+      const clients: FakeClient[] = [];
+      const deps = makeDeps([fanB], clients);
+      deps.findFanViaMdns = vi.fn(async (): Promise<string | undefined> => undefined);
+      new SuperfanPlatform(log, config, api, deps);
+      api.emit('didFinishLaunching');
+      await vi.waitFor(() => expect(api.registerPlatformAccessories).toHaveBeenCalledTimes(1));
+      const accessory = api.registerPlatformAccessories.mock.calls[0][2][0] as hap.Accessory;
+      expect(accessory.UUID).toBe(hap.uuid.generate('superfan:112233445566'));
+      expect(msgs.some((m) => m.level === 'warn' && /will keep looking/.test(m.msg))).toBe(true);
+      const active = accessory.getService(hap.Service.Fanv2)!.getCharacteristic(hap.Characteristic.Active);
+
+      await vi.advanceTimersByTimeAsync(15_000); // three failed polls
+      await expect(active.handleGetRequest()).rejects.toBe(-70402);
+
+      vi.mocked(deps.findFanViaMdns).mockResolvedValue('10.0.0.8');
+      await vi.advanceTimersByTimeAsync(6 * 60_000); // next local lookup (5-minute limit)
+      expect(clients[0].host).toBe('10.0.0.8');
+      await vi.advanceTimersByTimeAsync(31_000);
+      await expect(active.handleGetRequest()).resolves.toBe(1);
+      api.emit('shutdown');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /** Startup finds fanA+fanB; a later (slow) login returns them with new keys, or fails. */
+  function refusedFansSetup(second: () => Promise<{ fans: FanRecord[]; skipped: [] }>) {
+    const clients: FakeClient[] = [];
+    const deps = makeDeps([fanA, fanB], clients);
+    deps.discover = vi.fn()
+      .mockResolvedValueOnce({ fans: [fanA, fanB], skipped: [] })
+      .mockImplementation(() => new Promise((resolve, reject) => setTimeout(() => second().then(resolve, reject), 2000)));
+    return { clients, deps };
+  }
+  const rekeyed = [
+    { ...fanA, apikey: 'ak_new_a', apiSecret: 'sk_new_a' },
+    { ...fanB, apikey: 'ak_new_b', apiSecret: 'sk_new_b' },
+  ];
+
+  test('refused fans share one login, get new keys, and the cache is updated (#2)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const api = fakeApi();
+      const { log, msgs } = spyLog();
+      const { clients, deps } = refusedFansSetup(async () => ({ fans: rekeyed, skipped: [] }));
+      new SuperfanPlatform(log, config, api, deps);
+      api.emit('didFinishLaunching');
+      await vi.waitFor(() => expect(api.registerPlatformAccessories).toHaveBeenCalled());
+      for (const c of clients) {
+        c.status = new FanHttpError(403, 'denied');
+        const setKeys = c.setKeys.bind(c);
+        c.setKeys = (apikey, apiSecret) => {
+          setKeys(apikey, apiSecret);
+          c.status = { relays: [1], dimmer: 66 }; // the fan accepts its new keys
+        };
+      }
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(deps.discover).toHaveBeenCalledTimes(2);
+      expect(clients[0].keyCalls).toEqual([['ak_new_a', 'sk_new_a']]);
+      expect(clients[1].keyCalls).toEqual([['ak_new_b', 'sk_new_b']]);
+      await vi.waitFor(async () => {
+        const cached = await readCache(join(dir, 'superfan', 'cache.json'));
+        expect(cached?.fans.map((f) => f.apikey).sort()).toEqual(['ak_new_a', 'ak_new_b']);
+      });
+      expect(msgs.map((m) => m.msg).join('\n')).not.toMatch(/ak_new|sk_new/);
+      api.emit('shutdown');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('a shared login failure reaches every refused fan (Review Focus 5)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const api = fakeApi();
+      const { log, msgs } = spyLog();
+      const { clients, deps } = refusedFansSetup(async () => {
+        throw new CloudAuthError('Superfan login failed (HTTP 401)');
+      });
+      new SuperfanPlatform(log, config, api, deps);
+      api.emit('didFinishLaunching');
+      await vi.waitFor(() => expect(api.registerPlatformAccessories).toHaveBeenCalled());
+      for (const c of clients) c.status = new FanHttpError(403, 'denied');
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      expect(deps.discover).toHaveBeenCalledTimes(2);
+      const pw = msgs.filter((m) => m.level === 'warn' && /email\/password/.test(m.msg)).map((m) => m.msg);
+      expect(pw).toHaveLength(2);
+      expect(pw.some((m) => m.includes('Bedroom Fan'))).toBe(true);
+      expect(pw.some((m) => m.includes('Study Fan'))).toBe(true);
+      api.emit('shutdown');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('a cache write failure during a key refresh does not block the swap (Review Focus 4)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const cacheDir = join(dir, 'superfan');
+    try {
+      const api = fakeApi();
+      const { log, msgs } = spyLog();
+      const { clients, deps } = refusedFansSetup(async () => ({ fans: rekeyed, skipped: [] }));
+      new SuperfanPlatform(log, config, api, deps);
+      api.emit('didFinishLaunching');
+      await vi.waitFor(() => expect(api.registerPlatformAccessories).toHaveBeenCalled());
+      await vi.waitFor(async () => expect((await readCache(join(cacheDir, 'cache.json')))?.lastHosts).toEqual({ aabbccddeeff: '10.0.0.5', '112233445566': '10.0.0.8' }));
+      await mkdir(cacheDir, { recursive: true });
+      await chmod(cacheDir, 0o500); // cache directory becomes read-only
+      for (const c of clients) c.status = new FanHttpError(403, 'denied');
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(clients[0].keyCalls).toEqual([['ak_new_a', 'sk_new_a']]);
+      await vi.waitFor(() => expect(msgs.some((m) => m.level === 'debug' && /saved fan details/.test(m.msg))).toBe(true));
+      api.emit('shutdown');
+    } finally {
+      await chmod(cacheDir, 0o700).catch(() => undefined);
       vi.useRealTimers();
     }
   });

@@ -111,7 +111,7 @@ export function planAccessories(
 export interface PlatformDeps {
   discover: (creds: Credentials) => Promise<Discovery>;
   findFanViaMdns: (deviceId: string) => Promise<string | undefined>;
-  createClient: (o: { host: string; apikey: string; apiSecret: string }) => FanClient;
+  createClient: (o: { host?: string; apikey: string; apiSecret: string }) => FanClient;
 }
 
 export class SuperfanPlatform implements DynamicPlatformPlugin {
@@ -119,6 +119,10 @@ export class SuperfanPlatform implements DynamicPlatformPlugin {
   private readonly controllers: FanController[] = [];
   private readonly config?: SuperfanConfig;
   private readonly deps: PlatformDeps;
+  /** One cloud lookup shared by every fan asking for new keys at the same time. */
+  private keyLookup?: Promise<Discovery>;
+  /** Cache updates run one after another, so two fans saving at once can't overwrite each other. */
+  private cacheSaves: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly log: Logging,
@@ -152,11 +156,47 @@ export class SuperfanPlatform implements DynamicPlatformPlugin {
     return this.api.hap.uuid.generate(`superfan:${deviceId}`);
   }
 
+  private get cachePath(): string {
+    return join(this.api.user.storagePath(), 'superfan', 'cache.json');
+  }
+
+  private get creds(): Credentials {
+    return { email: this.config!.email, password: this.config!.password };
+  }
+
+  /** A fan keeps refusing its keys: fetch its current record from the cloud (one shared login). */
+  private async refreshKeys(deviceId: string): Promise<FanRecord | undefined> {
+    this.keyLookup ??= this.deps.discover(this.creds).finally(() => {
+      this.keyLookup = undefined;
+    });
+    const latest = (await this.keyLookup).fans.find((f) => f.deviceId === deviceId);
+    if (latest) {
+      void this.saveFan(latest); // in the background: new keys must not wait for the disk
+    }
+    return latest;
+  }
+
+  /** Replace one fan's saved details (e.g. new keys). Failures are logged, never thrown. */
+  private saveFan(fan: FanRecord): Promise<void> {
+    this.cacheSaves = this.cacheSaves.then(() => this.writeFan(fan));
+    return this.cacheSaves;
+  }
+
+  private async writeFan(fan: FanRecord): Promise<void> {
+    try {
+      const cache = await readCache(this.cachePath);
+      if (cache) {
+        await writeCache(this.cachePath, { ...cache, fans: [...cache.fans.filter((f) => f.deviceId !== fan.deviceId), fan] });
+      }
+    } catch (error) {
+      this.log.debug(`Could not update saved fan details (${(error as Error).message})`);
+    }
+  }
+
   private async start(): Promise<void> {
     const config = this.config!;
-    const creds = { email: config.email, password: config.password };
-    const cachePath = join(this.api.user.storagePath(), 'superfan', 'cache.json');
-    const { fans, lastHosts, keepIds } = await loadFans({ discover: () => this.deps.discover(creds), cachePath, log: this.log });
+    const cachePath = this.cachePath;
+    const { fans, lastHosts, keepIds } = await loadFans({ discover: () => this.deps.discover(this.creds), cachePath, log: this.log });
     if (!fans) {
       return; // unknown: keep restored accessories untouched
     }
@@ -178,50 +218,12 @@ export class SuperfanPlatform implements DynamicPlatformPlugin {
     const hosts: Record<string, string> = {};
     const created: PlatformAccessory[] = [];
     for (const fan of fans) {
-      const override = config.devices.find((d) => d.deviceId === fan.deviceId);
-      const host = await resolveHost({
-        override: override?.host,
-        cloudHost: fan.cloudHost,
-        lastHost: lastHosts[fan.deviceId],
-        mdns: () => this.deps.findFanViaMdns(fan.deviceId),
-      });
-      if (!host) {
-        this.log.warn(`Could not find "${fan.name}" (device ID ${fan.deviceId}) on the network; set its "host" in the plugin settings`);
-        continue;
+      try {
+        const host = await this.setupFan(fan, lastHosts[fan.deviceId], created);
+        if (host) hosts[fan.deviceId] = host;
+      } catch (error) {
+        this.log.error(`Could not set up "${fan.name}" (device ID ${fan.deviceId}): ${(error as Error).message}`);
       }
-      hosts[fan.deviceId] = host;
-
-      const client = this.deps.createClient({ host, apikey: fan.apikey, apiSecret: fan.apiSecret });
-      const firmware = await client.ping().then((p) => p.version || undefined).catch(() => undefined);
-
-      const uuid = this.uuidFor(fan.deviceId);
-      let accessory = this.cached.get(uuid);
-      if (!accessory) {
-        accessory = new this.api.platformAccessory(fan.name, uuid);
-        created.push(accessory);
-      }
-      accessory.context.deviceId = fan.deviceId;
-
-      const controller = new FanController({
-        client,
-        fan,
-        pollIntervalMs: config.pollInterval * 1000,
-        log: this.log,
-        // Local lookup only: an unpowered fan would otherwise mean a cloud login every few minutes,
-        // and the cloud just reports the same last-known IP anyway.
-        reresolve: override?.host ? undefined : () => this.deps.findFanViaMdns(fan.deviceId),
-      });
-      new SuperfanAccessory({
-        hap: this.api.hap,
-        accessory,
-        fan: override?.model ? { ...fan, model: override.model } : fan,
-        controller,
-        firmware,
-        log: this.log,
-      });
-      controller.start();
-      this.controllers.push(controller);
-      this.log.info(`"${fan.name}" (device ID ${fan.deviceId}) ready at ${host}`);
     }
 
     if (created.length) {
@@ -232,6 +234,57 @@ export class SuperfanPlatform implements DynamicPlatformPlugin {
     if (cache) {
       await writeCache(cachePath, { ...cache, lastHosts: { ...cache.lastHosts, ...hosts } });
     }
+  }
+
+  /** Set up one fan's accessory and controller. Returns the address it was found at, if any. */
+  private async setupFan(fan: FanRecord, lastHost: string | undefined, created: PlatformAccessory[]): Promise<string | undefined> {
+    const config = this.config!;
+    const override = config.devices.find((d) => d.deviceId === fan.deviceId);
+    const host = await resolveHost({
+      override: override?.host,
+      cloudHost: fan.cloudHost,
+      lastHost,
+      mdns: () => this.deps.findFanViaMdns(fan.deviceId),
+    });
+    if (!host) {
+      this.log.warn(`Could not find "${fan.name}" (device ID ${fan.deviceId}) on the network yet; will keep looking. If this persists, set its "host" in the plugin settings`);
+    }
+
+    const client = this.deps.createClient({ host, apikey: fan.apikey, apiSecret: fan.apiSecret });
+    const firmware = host ? await client.ping().then((p) => p.version || undefined).catch(() => undefined) : undefined;
+
+    const uuid = this.uuidFor(fan.deviceId);
+    const accessory = this.cached.get(uuid) ?? new this.api.platformAccessory(fan.name, uuid);
+    accessory.context.deviceId = fan.deviceId;
+
+    const controller = new FanController({
+      client,
+      fan,
+      pollIntervalMs: config.pollInterval * 1000,
+      log: this.log,
+      // Local lookup only: an unpowered fan would otherwise mean a cloud login every few minutes,
+      // and the cloud just reports the same last-known IP anyway.
+      reresolve: override?.host ? undefined : () => this.deps.findFanViaMdns(fan.deviceId),
+      // Only on repeated "access denied" (fan re-added in the app), never for an unreachable fan.
+      refreshKeys: () => this.refreshKeys(fan.deviceId),
+    });
+    new SuperfanAccessory({
+      hap: this.api.hap,
+      accessory,
+      fan: override?.model ? { ...fan, model: override.model } : fan,
+      controller,
+      firmware,
+      log: this.log,
+    });
+    if (!this.cached.has(uuid)) {
+      created.push(accessory);
+    }
+    controller.start();
+    this.controllers.push(controller);
+    if (host) {
+      this.log.info(`"${fan.name}" (device ID ${fan.deviceId}) ready at ${host}`);
+    }
+    return host;
   }
 
   private stop(): void {
