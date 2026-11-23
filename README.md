@@ -1,5 +1,7 @@
 # homebridge-superfan
 
+[![verified-by-homebridge](https://img.shields.io/badge/_-verified-blueviolet?color=%23491F59&style=flat&logoColor=%23FFFFFF&logo=homebridge)](https://github.com/homebridge/homebridge/wiki/Verified-Plugins)
+
 Control your **Superfan** smart ceiling fans from **Apple Home** and Siri, using [Homebridge](https://homebridge.io).
 
 Superfan's own app works with Google Home and Alexa, but not Apple Home. This plugin fills that gap. After a one-time sign-in to your Superfan account at startup, it talks to your fans **directly over your home Wi-Fi**, so taps in the Home app are fast and keep working even when the internet is down.
